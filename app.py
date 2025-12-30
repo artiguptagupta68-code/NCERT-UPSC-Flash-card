@@ -38,20 +38,29 @@ st.title("📘 NCERT + UPSC AI Question Generator")
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
         st.info("📥 Downloading NCERT ZIP...")
-        gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
+        gdown.download(
+            f"https://drive.google.com/uc?id={FILE_ID}",
+            ZIP_PATH,
+            quiet=False
+        )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
-        zip_ref.extractall(EXTRACT_DIR)
+    # extract main zip
+    with zipfile.ZipFile(ZIP_PATH, "r") as z:
+        z.extractall(EXTRACT_DIR)
 
-    # Show extracted files for verification
-    extracted_files = list(Path(EXTRACT_DIR).rglob("*"))
-    st.write(f"📄 Extracted {len(extracted_files)} files:")
-    for f in extracted_files[:10]:  # show first 10 files
-        st.write(f)
-    return extracted_files
+    # extract nested zips
+    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
+        try:
+            target = zfile.parent / zfile.stem
+            target.mkdir(exist_ok=True)
+            with zipfile.ZipFile(zfile, "r") as inner:
+                inner.extractall(target)
+        except:
+            pass
 
+    st.success("✅ NCERT PDFs extracted!")
 # ==============================
 # READ PDF & CLEAN TEXT
 # ==============================
