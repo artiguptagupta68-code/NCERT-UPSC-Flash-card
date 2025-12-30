@@ -173,7 +173,11 @@ download_and_extract()
 embedder = load_embedder()
 
 texts = load_all_texts()
-st.write(f"📄 PDFs Loaded: {len(texts)}")
+st.write(f"📄 Loaded {len(texts)} PDFs")
+for i, t in enumerate(texts[:3]):
+    st.write(f"--- PDF {i+1} content snippet ---")
+    st.write(t[:500])  # preview first 500 chars
+
 
 if not texts:
     st.error("No readable text found in PDFs.")
