@@ -15,7 +15,7 @@ import random
 # =========================================
 # CONFIG
 # =========================================
-FILE_ID = "1l5tGbJcvwsPiiOyi-MZYoWzoTDGjTWOz"
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
