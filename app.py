@@ -1,91 +1,71 @@
-# =========================================
-# NCERT + UPSC Flashcard Generator
-# =========================================
-
-import os, zipfile, re
+import os
+import zipfile
 from pathlib import Path
 import streamlit as st
-import gdown
-import numpy as np
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
-# --------------------------------------------
-# CONFIG
-# --------------------------------------------
-FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
-TOP_K = 6
-SIMILARITY_THRESHOLD_NCERT = 0.35
-SIMILARITY_THRESHOLD_UPSC = 0.45
 
-# --------------------------------------------
-# STREAMLIT CONFIG
-# --------------------------------------------
-st.set_page_config(page_title="NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT + UPSC Flashcard Generator")
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"  # your Google Drive file
 
-# --------------------------------------------
-# EMBEDDING MODEL
-# --------------------------------------------
-@st.cache_resource
-def load_embedder():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-embedder = load_embedder()
-
-# --------------------------------------------
-# DOWNLOAD & EXTRACT ZIP (with nested zips)
-# --------------------------------------------
+# -------------------------
+# Download & Extract ZIPs
+# -------------------------
 def download_and_extract():
+    import gdown
     if not os.path.exists(ZIP_PATH):
         st.info("📥 Downloading NCERT ZIP...")
         gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    # Extract main zip
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        z.extractall(EXTRACT_DIR)
+    def extract_zip(zip_path, target_dir):
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(target_dir)
+        # recursively extract nested zips
+        for zfile in Path(target_dir).rglob("*.zip"):
+            extract_zip(zfile, zfile.parent / zfile.stem)
+            zfile.unlink()  # optional: delete nested zip after extraction
 
-    # Recursively extract nested zips
-    def extract_nested(folder):
-        for zfile in Path(folder).rglob("*.zip"):
-            target = zfile.parent / zfile.stem
-            target.mkdir(exist_ok=True)
-            with zipfile.ZipFile(zfile, "r") as inner:
-                inner.extractall(target)
-            zfile.unlink()  # optional: delete zip after extraction
-            extract_nested(target)
-
-    extract_nested(EXTRACT_DIR)
-
+    extract_zip(ZIP_PATH, EXTRACT_DIR)
     st.success("✅ NCERT PDFs extracted!")
 
-# --------------------------------------------
-# PDF READING & CLEANING
-# --------------------------------------------
+# -------------------------
+# Read PDFs and check content
+# -------------------------
 def read_pdf(path):
     try:
-        reader = PdfReader(path)
-        return " ".join(p.extract_text() or "" for p in reader.pages)
+        reader = PdfReader(str(path))
+        text = " ".join([p.extract_text() or "" for p in reader.pages])
+        return text.strip()
     except:
         return ""
 
-def clean_text(text):
-    text = re.sub(r"(exercise|summary|table|figure|copyright).*", "", text, flags=re.I)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
 def load_all_texts():
     texts = []
+    loaded_pdfs = []
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        t = clean_text(read_pdf(str(pdf)))
-        if len(t.split()) > 50:
-            texts.append(t)
+        text = read_pdf(pdf)
+        if text:
+            texts.append(text)
+            loaded_pdfs.append(str(pdf))
+        else:
+            st.warning(f"No text found in: {pdf}")
+    st.write(f"📄 Loaded {len(texts)} PDFs with readable content:")
+    for p in loaded_pdfs:
+        st.write(f"- {p}")
     return texts
+
+# -------------------------
+# Streamlit App
+# -------------------------
+st.title("📘 NCERT PDF Loader")
+
+if st.button("📥 Load NCERT PDFs"):
+    download_and_extract()
+    texts = load_all_texts()
+
 
 # --------------------------------------------
 # SEMANTIC CHUNKING
