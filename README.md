@@ -1,0 +1,1 @@
+# NCERT-UPSC-Flash-card
