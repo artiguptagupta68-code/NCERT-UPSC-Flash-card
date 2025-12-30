@@ -123,42 +123,41 @@ def retrieve_relevant_chunks(chunks, embeddings, query, mode="NCERT", top_k=TOP_
     ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
     return [c for c, s in ranked if s >= threshold][:top_k]
 
-def generate_flashcard(chunks, topic):
+import re
+
+def generate_clean_flashcard(chunks, topic):
     """
-    Generates one clean flashcard from relevant chunks.
-    Filters out OCR artifacts, emails, and unrelated text.
+    Generates a clean flashcard from text chunks.
+    Filters out OCR artifacts, emails, page numbers, reprints, and other noise.
     """
     def is_valid_sentence(s):
-        # Remove short sentences or ones containing garbage words
-        garbage = [
+        s = s.strip()
+        if len(s.split()) < 8:
+            return False
+        # Remove common artifacts
+        garbage_words = [
             "email", "reprint", "isbn", "copyright",
             "page", "phone", "address", "editor"
         ]
-        s_clean = s.lower()
-        if len(s.split()) < 8:
-            return False
-        if any(g in s_clean for g in garbage):
-            return False
-        return True
+        return not any(g in s.lower() for g in garbage_words)
 
-    # Step 1: Split chunks into sentences and filter
+    # Collect clean sentences
     sentences = []
     for ch in chunks:
         for s in re.split(r'(?<=[.?!])\s+', ch):
-            s = s.strip()
             if is_valid_sentence(s):
-                sentences.append(s)
+                sentences.append(s.strip())
 
     if not sentences:
         return None
 
-    # Step 2: Create flashcard sections
+    # Create flashcard sections
     overview = sentences[0]
-    explanation = " ".join(sentences[1:5])  # Take next 4 sentences for explanation
-    conclusion = "This concept is important for governance and society."
-    key_points = [s for s in sentences[1:6]]  # First 5 meaningful points
+    explanation = " ".join(sentences[1:5])  # Take next 4 meaningful sentences
+    conclusion = "This concept is essential for understanding governance, rights, and society."
+    key_points = sentences[1:6]  # First 5 meaningful points
 
-    # Step 3: Format flashcard
+    # Format flashcard
     return {
         "title": topic.title(),
         "content": f"""
@@ -175,6 +174,7 @@ def generate_flashcard(chunks, topic):
 - {"\n- ".join(key_points)}
 """
     }
+
 
 # --------------------------------------------
 # SIDEBAR: LOAD PDFs
