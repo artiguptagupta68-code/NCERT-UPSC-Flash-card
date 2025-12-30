@@ -15,7 +15,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # ==============================
 # CONFIG
 # ==============================
-FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"  # <-- updated file ID
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
