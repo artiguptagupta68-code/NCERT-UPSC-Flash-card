@@ -1,19 +1,44 @@
 import os
 import zipfile
+import re
 from pathlib import Path
 import streamlit as st
+import gdown
+import numpy as np
 from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
+# --------------------------------------------
+# CONFIG
+# --------------------------------------------
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"  # Google Drive link
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"  # your Google Drive file
+SIMILARITY_THRESHOLD_NCERT = 0.35
+SIMILARITY_THRESHOLD_UPSC = 0.45
+TOP_K = 6
 
-# -------------------------
-# Download & Extract ZIPs
-# -------------------------
+# --------------------------------------------
+# STREAMLIT CONFIG
+# --------------------------------------------
+st.set_page_config(page_title="NCERT Flashcard Generator", layout="wide")
+st.title("📘 NCERT Flashcard Generator")
+
+# --------------------------------------------
+# LOAD EMBEDDER
+# --------------------------------------------
+@st.cache_resource
+def load_embedder():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+embedder = load_embedder()
+
+# --------------------------------------------
+# DOWNLOAD & EXTRACT ZIPs
+# --------------------------------------------
 def download_and_extract():
-    import gdown
     if not os.path.exists(ZIP_PATH):
         st.info("📥 Downloading NCERT ZIP...")
         gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
@@ -26,14 +51,14 @@ def download_and_extract():
         # recursively extract nested zips
         for zfile in Path(target_dir).rglob("*.zip"):
             extract_zip(zfile, zfile.parent / zfile.stem)
-            zfile.unlink()  # optional: delete nested zip after extraction
+            zfile.unlink()  # optional: remove nested zip after extraction
 
     extract_zip(ZIP_PATH, EXTRACT_DIR)
     st.success("✅ NCERT PDFs extracted!")
 
-# -------------------------
-# Read PDFs and check content
-# -------------------------
+# --------------------------------------------
+# READ PDFs
+# --------------------------------------------
 def read_pdf(path):
     try:
         reader = PdfReader(str(path))
@@ -56,16 +81,6 @@ def load_all_texts():
     for p in loaded_pdfs:
         st.write(f"- {p}")
     return texts
-
-# -------------------------
-# Streamlit App
-# -------------------------
-st.title("📘 NCERT PDF Loader")
-
-if st.button("📥 Load NCERT PDFs"):
-    download_and_extract()
-    texts = load_all_texts()
-
 
 # --------------------------------------------
 # SEMANTIC CHUNKING
@@ -141,7 +156,7 @@ def generate_flashcard(chunks, topic):
     }
 
 # --------------------------------------------
-# SIDEBAR: DOWNLOAD PDFs
+# SIDEBAR: LOAD PDFs
 # --------------------------------------------
 with st.sidebar:
     if st.button("📥 Load NCERT PDFs", key="load_pdfs"):
@@ -162,7 +177,6 @@ if st.button("Generate Flashcard", key="gen_flashcard"):
         all_chunks = []
         for t in texts:
             all_chunks.extend(semantic_chunking(t, embedder))
-
         embeddings = embedder.encode(all_chunks, convert_to_numpy=True)
         relevant = retrieve_relevant_chunks(all_chunks, embeddings, topic, mode)
         card = generate_flashcard(relevant, topic)
