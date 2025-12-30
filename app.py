@@ -123,35 +123,56 @@ def retrieve_relevant_chunks(chunks, embeddings, query, mode="NCERT", top_k=TOP_
     ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
     return [c for c, s in ranked if s >= threshold][:top_k]
 
-# --------------------------------------------
-# FLASHCARD GENERATION
-# --------------------------------------------
 def generate_flashcard(chunks, topic):
+    """
+    Generates one clean flashcard from relevant chunks.
+    Filters out OCR artifacts, emails, and unrelated text.
+    """
+    def is_valid_sentence(s):
+        # Remove short sentences or ones containing garbage words
+        garbage = [
+            "email", "reprint", "isbn", "copyright",
+            "page", "phone", "address", "editor"
+        ]
+        s_clean = s.lower()
+        if len(s.split()) < 8:
+            return False
+        if any(g in s_clean for g in garbage):
+            return False
+        return True
+
+    # Step 1: Split chunks into sentences and filter
     sentences = []
     for ch in chunks:
         for s in re.split(r'(?<=[.?!])\s+', ch):
-            if len(s.split()) > 8:
-                sentences.append(s.strip())
+            s = s.strip()
+            if is_valid_sentence(s):
+                sentences.append(s)
+
     if not sentences:
         return None
+
+    # Step 2: Create flashcard sections
     overview = sentences[0]
-    explanation = " ".join(sentences[1:6])
+    explanation = " ".join(sentences[1:5])  # Take next 4 sentences for explanation
     conclusion = "This concept is important for governance and society."
-    points = [" ".join(s.split()[:20]) for s in sentences[1:6]]
+    key_points = [s for s in sentences[1:6]]  # First 5 meaningful points
+
+    # Step 3: Format flashcard
     return {
         "title": topic.title(),
         "content": f"""
-**Concept Overview**
+**Concept Overview**  
 {overview}
 
-**Explanation**
+**Explanation**  
 {explanation}
 
-**Conclusion**
+**Conclusion**  
 {conclusion}
 
-**Key Points**
-- {"\n- ".join(points)}
+**Key Points**  
+- {"\n- ".join(key_points)}
 """
     }
 
