@@ -65,11 +65,11 @@ def download_and_extract():
 # READ PDF & CLEAN TEXT
 # ==============================
 def read_pdf(path):
-    try:
-        reader = PdfReader(path)
-        return " ".join(p.extract_text() or "" for p in reader.pages)
-    except:
-        return ""
+    reader = PdfReader(path)
+    text = " ".join([p.extract_text() or "" for p in reader.pages])
+    if not text.strip():
+        st.warning(f"⚠️ No text found in {path}")
+    return text
 
 def clean_text(text):
     text = re.sub(r"(exercise|summary|table|figure|copyright).*", "", text, flags=re.I)
