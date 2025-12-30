@@ -125,7 +125,7 @@ def retrieve_relevant_chunks(chunks, embeddings, query, mode="NCERT", top_k=TOP_
 
 import re
 
-def generate_clean_flashcard(chunks, topic):
+def generate_flashcard(chunks, topic):
     """
     Generates a clean flashcard from text chunks.
     Filters out OCR artifacts, emails, page numbers, reprints, and other noise.
