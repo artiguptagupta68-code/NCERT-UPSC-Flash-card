@@ -123,24 +123,22 @@ def load_subject_text(subject):
 # =====================================================
 # CHUNKING
 # =====================================================
-def chunk_text(text, min_words=50, max_words=120):
+def chunk_text(text, min_words=80, max_words=200):
     sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks, current = [], []
 
     for s in sentences:
-        if len(s.split()) < 6:
+        if len(s.split()) < 5:  # ignore tiny sentences
             continue
-
         current.append(s)
-
-        if sum(len(x.split()) for x in current) >= max_words:
+        total_words = sum(len(x.split()) for x in current)
+        if total_words >= max_words:
             chunks.append(" ".join(current))
             current = []
-
     if current:
         chunks.append(" ".join(current))
-
     return chunks
+
 
 
 # =====================================================
@@ -179,52 +177,37 @@ def deduplicate(chunks, threshold=0.85):
 # =====================================================
 # FLASHCARD GENERATION
 # =====================================================
-def generate_flashcard(chunks, topic, depth):
-    if not chunks:
+def generate_flashcards(chunks, topic):
+    flashcards = []
+    for c in chunks:
+        sents = re.split(r'(?<=[.!?])\s+', c)
+        if len(sents) < 2:
+            continue
+        overview = sents[0]
+        explanation = " ".join(sents[1:4])
+        flashcards.append({
+            "overview": overview,
+            "explanation": explanation
+        })
+    return flashcards
+def summarize_flashcards(flashcards, topic):
+    if not flashcards:
         return None
-
-    embeddings = model.encode(chunks)
-    query = model.encode([topic])
-
-    sims = cosine_similarity(query, embeddings)[0]
-    cfg = DEPTH_CONFIG[depth]
-
-    ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
-    selected = [c for c, s in ranked if s >= cfg["similarity"]][:cfg["top_k"]]
-
-    if not selected:
-        return None
-
-    if depth == "NCERT":
-        return f"""
-### 📘 {topic} — NCERT
-
+    overview = flashcards[0]["overview"]
+    explanation = " ".join([f["explanation"] for f in flashcards[:4]])
+    return f"""
+### 📘 {topic} (Summary)
 **Concept Overview**  
-{selected[0]}
+{overview}
 
 **Explanation**  
-{" ".join(selected[1:3])}
+{explanation}
 
-**Key Takeaway**  
-This concept explains the basic principles necessary for understanding Indian democracy and governance.
+**Why it Matters**
+- Understand key rights & governance  
+- Useful for UPSC & NCERT exams
 """
 
-    else:
-        return f"""
-### 📘 {topic} — UPSC
-
-**Introduction**  
-{selected[0]}
-
-**Analytical Explanation**  
-{" ".join(selected[1:4])}
-
-**Why It Matters**  
-This topic is crucial for understanding constitutional philosophy, governance, and contemporary issues.
-
-**Exam Tip**  
-Focus on interpretation, examples, and linkage with current affairs.
-"""
 
 
 # =====================================================
