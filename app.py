@@ -105,14 +105,15 @@ def clean_text(text):
 
 def load_subject_text(subject):
     texts = []
-    keywords = SUBJECTS[subject]
-for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-    if any(k in pdf.name.lower() for k in keywords):
+
+    for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
         text = clean_text(read_pdf(pdf))
-        if len(text.split()) > 80:
+        if len(text.split()) > 80:  # load only if enough text
             texts.append(text)
 
     return texts
+
+ 
 
 def chunk_text(text, chunk_size=5):
     sentences = [s for s in re.split(r"(?<=[.?!])\s+", text) if is_valid_sentence(s)]
