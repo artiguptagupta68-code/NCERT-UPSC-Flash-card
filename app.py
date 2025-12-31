@@ -2,87 +2,82 @@ import os
 import re
 import zipfile
 from pathlib import Path
+
 import streamlit as st
 import gdown
+import numpy as np
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ================================
+# =====================================================
 # CONFIG
-# ================================
+# =====================================================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
 SUBJECTS = {
-    "Polity": ["polity", "political", "constitution"],
-    "Economics": ["economics", "economic"],
-    "Sociology": ["sociology", "society"],
-    "Psychology": ["psychology", "mind", "behavior"],
-    "Business Studies": ["business", "management", "commerce"]
+    "Polity": ["polity"],
+    "Economics": ["economics"],
+    "Sociology": ["sociology"],
+    "Psychology": ["psychology"],
+    "Business Studies": ["business"]
 }
-
 
 DEPTH_CONFIG = {
     "NCERT": {"chunk_size": 3, "similarity": 0.35},
     "UPSC": {"chunk_size": 6, "similarity": 0.45}
 }
 
-TOP_K = 6
-
-# ================================
+# =====================================================
 # STREAMLIT SETUP
-# ================================
+# =====================================================
 st.set_page_config(page_title="NCERT + UPSC Flashcards", layout="wide")
 st.title("📘 NCERT + UPSC Smart Flashcard Generator")
 
-# ================================
+# =====================================================
 # LOAD EMBEDDING MODEL
-# ================================
+# =====================================================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
 model = load_model()
 
-# ================================
-# DOWNLOAD & EXTRACT NCERT ZIP
-# ================================
+# =====================================================
+# UTILITIES
+# =====================================================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
         st.info("📥 Downloading NCERT ZIP...")
         gdown.download(
-            f"https://drive.google.com/uc?id={FILE_ID}",
-            ZIP_PATH,
+            url=f"https://drive.google.com/uc?id={FILE_ID}",
+            output=ZIP_PATH,
             quiet=False,
             fuzzy=True
         )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    # Extract main ZIP
     with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
         zip_ref.extractall(EXTRACT_DIR)
 
-    # Extract nested ZIPs
+    # Extract nested zips safely
     for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
             target = zfile.parent / zfile.stem
             target.mkdir(exist_ok=True)
             with zipfile.ZipFile(zfile, "r") as inner:
                 inner.extractall(target)
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Skipped corrupted zip: {zfile}")
 
-    st.success("✅ NCERT PDFs extracted!")
+    st.success("✅ NCERT PDFs extracted successfully")
 
-# ================================
-# PDF READING & CLEANING
-# ================================
 def read_pdf(path):
     try:
-        reader = PdfReader(path)
+        reader = PdfReader(str(path))
         text = ""
         for page in reader.pages:
             page_text = page.extract_text()
@@ -91,6 +86,17 @@ def read_pdf(path):
         return text.strip()
     except:
         return ""
+
+def is_valid_sentence(s):
+    if len(s.split()) < 5:
+        return False
+    if re.search(r"(Email|Chief Editor|Production|Cover|Illustrations|stamps|price|rubber stamp|ISBN|copyright|Reprint)", s, re.I):
+        return False
+    if s.isupper() and len(s.split()) < 8:
+        return False
+    if len(re.findall(r"[•●]", s)) > 0:
+        return False
+    return True
 
 def clean_text(text):
     text = re.sub(r"(activity|exercise|project|reprint|isbn|copyright).*", " ", text, flags=re.I)
@@ -102,72 +108,58 @@ def load_subject_text(subject):
     keywords = SUBJECTS[subject]
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        pdf_path_lower = str(pdf).lower()  # check full path too
-        if any(k in pdf_path_lower for k in keywords):
+        if any(k in pdf.name.lower() for k in keywords):
             text = clean_text(read_pdf(pdf))
             if len(text.split()) > 80:
                 texts.append(text)
+
     return texts
 
-# ================================
-# SEMANTIC CHUNKING
-# ================================
-def chunk_text(text, depth):
-    max_sentences = DEPTH_CONFIG[depth]["chunk_size"]
-    sentences = re.split(r"(?<=[.?!])\s+", text)
-    sentences = [s.strip() for s in sentences if len(s.split()) > 6]
-
+def chunk_text(text, chunk_size=5):
+    sentences = [s for s in re.split(r"(?<=[.?!])\s+", text) if is_valid_sentence(s)]
     chunks = []
-    current = []
-    for s in sentences:
-        current.append(s)
-        if len(current) >= max_sentences:
-            chunks.append(" ".join(current))
-            current = []
-    if current:
-        chunks.append(" ".join(current))
+    for i in range(0, len(sentences), chunk_size):
+        chunk = sentences[i:i+chunk_size]
+        if chunk:
+            chunks.append(" ".join(chunk))
     return chunks
 
-# ================================
-# FLASHCARD GENERATION
-# ================================
+def generate_flashcards(chunks, topic, depth="NCERT"):
+    if not chunks:
+        return []
 
+    embeddings = model.encode(chunks)
+    query_vec = model.encode([topic])
+    sims = cosine_similarity(query_vec, embeddings)[0]
 
-def is_valid_sentence(s):
-    # Ignore sentences with:
-    # - Emails
-    # - Page headers, prefaces, copyright, price info, editor names
-    # - Excessive punctuation or symbols
-    # - Very short sentences (<5 words)
-    if re.search(r"(Email|Chief Editor|Production|Cover|Illustrations|stamps|price|rubber stamp|ISBN|copyright|Reprint)", s, re.I):
-        return False
-    if len(s.split()) < 5:
-        return False
-    # Avoid all caps or symbol-heavy sentences
-    if s.isupper() and len(s.split()) < 8:
-        return False
-    if len(re.findall(r"[•●]", s)) > 0:
-        return False
-    return True
+    threshold = DEPTH_CONFIG[depth]["similarity"]
+    ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
+    selected_chunks = [c for c, s in ranked if s >= threshold]
 
+    flashcards = []
+    for ch in selected_chunks:
+        sents = [s for s in re.split(r"(?<=[.?!])\s+", ch) if is_valid_sentence(s)]
+        if len(sents) >= 2:
+            flashcards.append({
+                "overview": sents[0],
+                "explanation": " ".join(sents[1:4]),
+                "key_points": sents[:3]
+            })
+    return flashcards
 
-def generate_flashcard(chunks, topic, depth="NCERT"):
-    sentences = []
-    for ch in chunks:
-        for s in re.split(r"(?<=[.?!])\s+", ch):
-            if is_valid_sentence(s):
-                sentences.append(s.strip())
-
-    if not sentences:
+def summarize_flashcards(flashcards, topic, depth="NCERT"):
+    if not flashcards:
         return None
 
-    overview = sentences[0]
-    explanation = " ".join(sentences[1:4])
-    key_points = sentences[1:5]
+    overview = flashcards[0]["overview"]
+    explanation = " ".join([f["explanation"] for f in flashcards[:5]])
+    key_points = []
+    for f in flashcards[:5]:
+        key_points.extend(f["key_points"])
 
-    if depth == "NCERT":
+    if depth=="NCERT":
         return f"""
-### 📘 {topic} (NCERT)
+### 📘 {topic} (NCERT Summary)
 
 **Concept Overview**  
 {overview}
@@ -175,12 +167,12 @@ def generate_flashcard(chunks, topic, depth="NCERT"):
 **Explanation**  
 {explanation}
 
-**Key Points**
+**Key Points**  
 - {"\n- ".join(key_points)}
 """
     else:
         return f"""
-### 📘 {topic} (UPSC)
+### 📘 {topic} (UPSC Summary)
 
 **Introduction**  
 {overview}
@@ -188,53 +180,16 @@ def generate_flashcard(chunks, topic, depth="NCERT"):
 **Analytical Explanation**  
 {explanation}
 
-**Key Points**
+**Key Points**  
 - {"\n- ".join(key_points)}
 
 **Conclusion**  
 This topic is central to governance, constitutionalism, and democratic functioning in India.
 """
 
-
-    # Choose first sentence as overview, next 3 as explanation
-    overview = sentences[0]
-    explanation = " ".join(sentences[1:4])
-    key_points = [s for s in sentences[1:5]]
-
-    if depth == "NCERT":
-        return f"""
-### 📘 {topic} (NCERT)
-
-**Concept Overview**  
-{overview}
-
-**Explanation**  
-{explanation}
-
-**Key Points**
-- {"\n- ".join(key_points)}
-"""
-    else:  # UPSC depth
-        return f"""
-### 📘 {topic} (UPSC)
-
-**Introduction**  
-{overview}
-
-**Analytical Explanation**  
-{explanation}
-
-**Key Points**
-- {"\n- ".join(key_points)}
-
-**Conclusion**  
-This topic is central to governance, constitutionalism, and democratic functioning in India.
-"""
-
-
-# ================================
-# MAIN UI
-# ================================
+# =====================================================
+# STREAMLIT UI
+# =====================================================
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
@@ -243,15 +198,18 @@ topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
+
     if not texts:
         st.warning("⚠️ No readable content found for this subject.")
     else:
         all_chunks = []
         for t in texts:
-            all_chunks.extend(chunk_text(t, depth))
+            all_chunks.extend(chunk_text(t, chunk_size=DEPTH_CONFIG[depth]["chunk_size"]))
 
-        result = generate_flashcard(all_chunks, topic, depth)
-        if result:
-            st.markdown(result)
+        flashcards = generate_flashcards(all_chunks, topic, depth)
+        summary_card = summarize_flashcards(flashcards, topic, depth)
+
+        if summary_card:
+            st.markdown(summary_card)
         else:
             st.warning("No meaningful content found for this topic.")
