@@ -45,27 +45,32 @@ def load_model():
 
 model = load_model()
 
-# =====================================================
-# DOWNLOAD & EXTRACT
-# =====================================================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT PDFs...")
-        gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
+        st.info("📥 Downloading NCERT ZIP...")
+        gdown.download(
+            url=f"https://drive.google.com/uc?id={FILE_ID}",
+            output=ZIP_PATH,
+            quiet=False,
+            fuzzy=True
+        )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        z.extractall(EXTRACT_DIR)
+    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
+        zip_ref.extractall(EXTRACT_DIR)
 
-    for z in Path(EXTRACT_DIR).rglob("*.zip"):
+    # Extract nested zips safely
+    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
-            target = z.parent / z.stem
+            target = zfile.parent / zfile.stem
             target.mkdir(exist_ok=True)
-            with zipfile.ZipFile(z, "r") as inner:
+            with zipfile.ZipFile(zfile, "r") as inner:
                 inner.extractall(target)
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Skipped corrupted zip: {zfile}")
+
+    st.success("✅ NCERT PDFs extracted successfully")
 
 # =====================================================
 # PDF READING
