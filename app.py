@@ -13,9 +13,19 @@ from sklearn.metrics.pairwise import cosine_similarity
 # =====================================================
 # CONFIG
 # =====================================================
+
+
+import gdown
+
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
+gdown.download(
+    url=f"https://drive.google.com/uc?id={FILE_ID}",
+    output=ZIP_PATH,
+    quiet=False,
+    fuzzy=True  # important for gdown to parse the URL correctly
+)
 
 SUBJECTS = {
     "Polity": ["polity"],
