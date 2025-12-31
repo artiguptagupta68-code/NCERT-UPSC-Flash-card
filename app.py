@@ -131,18 +131,25 @@ def chunk_text(text, depth):
 # ================================
 # FLASHCARD GENERATION
 # ================================
-import re
+
 
 def is_valid_sentence(s):
-    # Ignore page numbers, emails, or headers
-    if re.search(r"(Prelims\.indd|Reprint|Email|@|\d{4})", s):
+    # Ignore sentences with:
+    # - Emails
+    # - Page headers, prefaces, copyright, price info, editor names
+    # - Excessive punctuation or symbols
+    # - Very short sentences (<5 words)
+    if re.search(r"(Email|Chief Editor|Production|Cover|Illustrations|stamps|price|rubber stamp|ISBN|copyright|Reprint)", s, re.I):
         return False
-    if len(s.split()) < 5:  # too short
+    if len(s.split()) < 5:
         return False
-    # avoid all-caps metadata lines
+    # Avoid all caps or symbol-heavy sentences
     if s.isupper() and len(s.split()) < 8:
         return False
+    if len(re.findall(r"[•●]", s)) > 0:
+        return False
     return True
+
 
 def generate_flashcard(chunks, topic, depth="NCERT"):
     sentences = []
@@ -150,9 +157,44 @@ def generate_flashcard(chunks, topic, depth="NCERT"):
         for s in re.split(r"(?<=[.?!])\s+", ch):
             if is_valid_sentence(s):
                 sentences.append(s.strip())
-    
+
     if not sentences:
         return None
+
+    overview = sentences[0]
+    explanation = " ".join(sentences[1:4])
+    key_points = sentences[1:5]
+
+    if depth == "NCERT":
+        return f"""
+### 📘 {topic} (NCERT)
+
+**Concept Overview**  
+{overview}
+
+**Explanation**  
+{explanation}
+
+**Key Points**
+- {"\n- ".join(key_points)}
+"""
+    else:
+        return f"""
+### 📘 {topic} (UPSC)
+
+**Introduction**  
+{overview}
+
+**Analytical Explanation**  
+{explanation}
+
+**Key Points**
+- {"\n- ".join(key_points)}
+
+**Conclusion**  
+This topic is central to governance, constitutionalism, and democratic functioning in India.
+"""
+
 
     # Choose first sentence as overview, next 3 as explanation
     overview = sentences[0]
