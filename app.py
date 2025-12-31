@@ -57,13 +57,34 @@ def download_and_extract():
     st.success("✅ NCERT PDFs extracted successfully")
 
 # ===================== CLEAN TEXT =====================
-def clean_text(text):
-    text = re.sub(r"(activity|exercise|project|editor|reprint|isbn|copyright|email|Prelims\.indd).*", " ", text, flags=re.I)
+
+def clean_text(text: str) -> str:
+    # Remove publisher/editor junk
+    junk_patterns = [
+        r"Prelims\.indd.*",
+        r"ISBN.*",
+        r"©.*",
+        r"All rights reserved.*",
+        r"Printed in.*",
+        r"Chief.*",
+        r"Editor.*",
+        r"Professor.*",
+        r"University.*",
+        r"Department.*",
+        r"Delhi.*",
+        r"NCERT.*",
+        r"Reprint.*",
+        r"\b\d{1,2}:\d{2}:\d{2}\b",
+    ]
+
+    for pat in junk_patterns:
+        text = re.sub(pat, " ", text, flags=re.I)
+
+    # Remove repeated spaces and lines
+    text = re.sub(r"\n+", "\n", text)
     text = re.sub(r"\s+", " ", text)
-    # keep only sentences of reasonable length
-    sentences = re.split(r'(?<=[.?!])\s+', text)
-    sentences = [s.strip() for s in sentences if 5 <= len(s.split()) <= 40]
-    return " ".join(sentences)
+
+    return text.strip()
 
 def read_pdf(path):
     try:
@@ -88,13 +109,43 @@ def load_subject_text(subject):
 
 
 # ===================== CHUNKING =====================
-def chunk_text(text, chunk_size=3):
-    sentences = re.split(r'(?<=[.?!])\s+', text)
-    sentences = [s for s in sentences if 5 <= len(s.split()) <= 40]
-    chunks = []
-    for i in range(0, len(sentences), chunk_size):
-        chunks.append(" ".join(sentences[i:i+chunk_size]))
+def chunk_text(text, min_words=40, max_words=120):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks, current = [], []
+
+    for s in sentences:
+        if len(s.split()) < 6:
+            continue
+
+        current.append(s)
+
+        if sum(len(x.split()) for x in current) >= max_words:
+            chunks.append(" ".join(current))
+            current = []
+
+    if current:
+        chunks.append(" ".join(current))
+
     return chunks
+
+def remove_duplicate_chunks(chunks, model, threshold=0.85):
+    if len(chunks) <= 1:
+        return chunks
+
+    embeddings = model.encode(chunks)
+    keep = []
+
+    for i, emb in enumerate(embeddings):
+        is_dup = False
+        for kept in keep:
+            sim = cosine_similarity([emb], [kept[1]])[0][0]
+            if sim > threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            keep.append((chunks[i], emb))
+
+    return [x[0] for x in keep]
 
 
 # ===================== LOAD EMBEDDING =====================
@@ -106,50 +157,24 @@ model = load_embedder()
 
 
 # ===================== FLASHCARD GENERATION =====================
-def generate_flashcards(chunks, topic, depth="NCERT"):
-    if not chunks:
-        return None
-    
-    chunk_size = DEPTH_CONFIG[depth]["chunk_size"]
-    threshold = DEPTH_CONFIG[depth]["similarity"]
-    
-    # Create embeddings
-    embeddings = model.encode(chunks)
-    query_emb = model.encode([topic])
-    sims = cosine_similarity(query_emb, embeddings)[0]
-    
-    # Rank chunks
-    ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
-    selected = [c for c, s in ranked if s >= threshold][:TOP_K]
-    
-    # Build flashcards
-    flashcards = []
-    for idx, c in enumerate(selected):
-        sentences = re.split(r'(?<=[.?!])\s+', c)
-        if len(sentences) >= 2:
-            flashcards.append({
-                "overview": sentences[0],
-                "explanation": " ".join(sentences[1:])
-            })
-    return flashcards
+def generate_summary_flashcard(chunks, topic):
+    joined = " ".join(chunks[:4])
 
-def summarize_flashcards(flashcards, topic):
-    if not flashcards:
-        return None
-    overview = flashcards[0]["overview"]
-    explanation = " ".join([f["explanation"] for f in flashcards[:3]])
     return f"""
-### 📘 {topic}
+## ⭐ Master Summary: {topic}
 
-**Concept Overview**  
-{overview}
+**Core Idea**  
+{joined}
 
-**Explanation**  
-{explanation}
+**Why it Matters**
+- Strengthens constitutional understanding  
+- Helps relate rights to daily life  
+- Essential for UPSC & NCERT clarity  
 
-**Conclusion**  
-This concept is important for understanding governance, rights, and social structures in society.
+**Exam Tip**
+Questions often test interpretation rather than memorization.
 """
+
 
 # ===================== UI =====================
 download_and_extract()
@@ -158,19 +183,21 @@ subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
 depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
 topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
-if st.button("Generate Flashcard"):
-    texts = load_subject_text(subject)
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        all_chunks = []
-        for t in texts:
-            all_chunks.extend(chunk_text(t, chunk_size=DEPTH_CONFIG[depth]["top_k"]))
+texts = load_subject_text(subject)
+cleaned = [clean_text(t) for t in texts]
 
-        flashcards = generate_flashcards(all_chunks, topic, depth)
-        final_card = summarize_flashcards(flashcards, topic)
+chunks = []
+for t in cleaned:
+    chunks.extend(chunk_text(t))
 
-        if final_card:
-            st.markdown(final_card)
-        else:
-            st.warning("No meaningful content could be generated for this topic.")
+chunks = remove_duplicate_chunks(chunks, model)
+
+flashcards = generate_flashcards(chunks, topic, depth)
+summary = generate_summary_flashcard(chunks, topic)
+
+# Display
+for fc in flashcards[:5]:
+    st.markdown(fc)
+
+st.markdown("---")
+st.markdown(summary)
