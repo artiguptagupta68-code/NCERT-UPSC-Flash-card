@@ -75,12 +75,15 @@ def read_pdf(path):
 def load_subject_text(subject):
     texts = []
     keywords = SUBJECTS[subject]
+
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in pdf.name.lower() for k in keywords):
+        name_lower = pdf.stem.replace("_", " ").lower()
+        if any(k.lower() in name_lower for k in keywords):
             text = clean_text(read_pdf(pdf))
-            if len(text.split()) > 80:
+            if len(text.split()) > 50:  # lower threshold
                 texts.append(text)
     return texts
+
 
 # ===================== CHUNKING =====================
 def chunk_text(text, chunk_size=5):
