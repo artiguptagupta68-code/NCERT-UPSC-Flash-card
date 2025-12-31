@@ -131,51 +131,64 @@ def chunk_text(text, depth):
 # ================================
 # FLASHCARD GENERATION
 # ================================
-def generate_flashcard(chunks, topic, depth):
-    if not chunks:
+import re
+
+def is_valid_sentence(s):
+    # Ignore page numbers, emails, or headers
+    if re.search(r"(Prelims\.indd|Reprint|Email|@|\d{4})", s):
+        return False
+    if len(s.split()) < 5:  # too short
+        return False
+    # avoid all-caps metadata lines
+    if s.isupper() and len(s.split()) < 8:
+        return False
+    return True
+
+def generate_flashcard(chunks, topic, depth="NCERT"):
+    sentences = []
+    for ch in chunks:
+        for s in re.split(r"(?<=[.?!])\s+", ch):
+            if is_valid_sentence(s):
+                sentences.append(s.strip())
+    
+    if not sentences:
         return None
 
-    embeddings = model.encode(chunks)
-    query = model.encode([topic])
-    threshold = DEPTH_CONFIG[depth]["similarity"]
-
-    sims = cosine_similarity(query, embeddings)[0]
-    ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
-    selected = [c for c, s in ranked if s >= threshold][:TOP_K]
-
-    if not selected:
-        return None
+    # Choose first sentence as overview, next 3 as explanation
+    overview = sentences[0]
+    explanation = " ".join(sentences[1:4])
+    key_points = [s for s in sentences[1:5]]
 
     if depth == "NCERT":
         return f"""
 ### 📘 {topic} (NCERT)
 
 **Concept Overview**  
-{selected[0]}
+{overview}
 
 **Explanation**  
-{" ".join(selected[1:3]) if len(selected) > 1 else ""}
+{explanation}
 
 **Key Points**
-- {selected[0].split('.')[0]}
-- {selected[1].split('.')[0] if len(selected) > 1 else ""}
+- {"\n- ".join(key_points)}
 """
-    else:
+    else:  # UPSC depth
         return f"""
 ### 📘 {topic} (UPSC)
 
 **Introduction**  
-{selected[0]}
+{overview}
 
 **Analytical Explanation**  
-{" ".join(selected[1:4]) if len(selected) > 1 else ""}
+{explanation}
 
-**Contemporary Relevance**  
-{selected[4] if len(selected) > 4 else selected[-1]}
+**Key Points**
+- {"\n- ".join(key_points)}
 
 **Conclusion**  
 This topic is central to governance, constitutionalism, and democratic functioning in India.
 """
+
 
 # ================================
 # MAIN UI
