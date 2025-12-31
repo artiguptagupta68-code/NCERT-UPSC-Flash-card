@@ -1,101 +1,98 @@
-import os, re, zipfile
+import os
+import zipfile
+import re
 from pathlib import Path
 import streamlit as st
 import gdown
-import numpy as np
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
-# ======================================================
+# -----------------------------
 # CONFIG
-# ======================================================
-FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
+# -----------------------------
+FILE_ID = "1gdiCsGOeIyaDlJ--9qon8VTya3dbjr6G"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-SUBJECTS = {
-    "Polity": ["polity", "constitution", "civics"],
-    "Economics": ["economics", "economic"],
-    "Sociology": ["sociology", "society"],
-    "Psychology": ["psychology"],
-    "Business Studies": ["business", "management"]
-}
-
-SIM_THRESHOLD = 0.45
-
-# ======================================================
-# STREAMLIT SETUP
-# ======================================================
-st.set_page_config(page_title="NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT Smart Flashcard Generator")
-
-# ======================================================
-# LOAD MODEL
-# ======================================================
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-model = load_model()
-
-# ======================================================
-# DOWNLOAD & EXTRACT
-# ======================================================
+# -----------------------------
+# DOWNLOAD & EXTRACT ZIP
+# -----------------------------
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT content...")
-        gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
+        st.info("📥 Downloading NCERT ZIP...")
+        gdown.download(
+            f"https://drive.google.com/uc?id={FILE_ID}",
+            ZIP_PATH,
+            quiet=False
+        )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        z.extractall(EXTRACT_DIR)
+    # Extract main zip
+    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
+        zip_ref.extractall(EXTRACT_DIR)
 
-    # extract nested zips
-    for z in Path(EXTRACT_DIR).rglob("*.zip"):
+    # Extract nested zips safely
+    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
-            with zipfile.ZipFile(z, "r") as inner:
-                inner.extractall(z.parent / z.stem)
-        except:
-            pass
+            target = zfile.parent / zfile.stem
+            target.mkdir(exist_ok=True)
+            with zipfile.ZipFile(zfile, "r") as inner:
+                inner.extractall(target)
+        except Exception as e:
+            st.warning(f"Skipped corrupted zip: {zfile}")
 
-# ======================================================
-# TEXT CLEANING
-# ======================================================
+    st.success("✅ NCERT PDFs extracted successfully")
+
+# -----------------------------
+# READ PDF TEXT SAFELY
+# -----------------------------
+def read_pdf(path):
+    try:
+        reader = PdfReader(path)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + " "
+        return text.strip()
+    except Exception:
+        return ""
+
+# -----------------------------
+# CLEAN TEXT
+# -----------------------------
 def clean_text(text):
-    text = re.sub(r"\S+@\S+", "", text)
-    text = re.sub(r"(reprint|chapter|page|indd|isbn|copyright).*", "", text, flags=re.I)
-    text = re.sub(r"WE, THE PEOPLE.*?CONSTITUTION", "", text, flags=re.I)
+    text = re.sub(
+        r"(activity|let us|exercise|project|editor|reprint|copyright|isbn).*",
+        " ",
+        text,
+        flags=re.I,
+    )
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def is_valid_sentence(s):
-    if len(s.split()) < 8:
-        return False
-    garbage = ["email", "reprint", "page", "copyright"]
-    return not any(g in s.lower() for g in garbage)
-
-# ======================================================
-# LOAD PDFs BY SUBJECT
-# ======================================================
-def load_subject_text(subject):
+# -----------------------------
+# LOAD ALL PDF TEXTS
+# -----------------------------
+def load_all_texts():
     texts = []
-    keywords = SUBJECTS[subject]
+    valid_files = []
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if not any(k in pdf.name.lower() for k in keywords):
-            continue
-        try:
-            reader = PdfReader(pdf)
-            text = " ".join(p.extract_text() or "" for p in reader.pages)
-            text = clean_text(text)
-            if len(text.split()) > 100:
-                texts.append(text)
-        except:
-            pass
+        text = clean_text(read_pdf(pdf))
+        if len(text.split()) > 80:  # important threshold
+            texts.append(text)
+            valid_files.append(str(pdf))
+
+    st.write(f"📄 Loaded {len(valid_files)} PDFs with readable content:")
+    for f in valid_files:
+        st.write("•", f)
+
+    if not texts:
+        st.warning("⚠️ No readable content found. PDFs may be scanned images.")
 
     return texts
+
 
 # ======================================================
 # SEMANTIC CHUNKING
