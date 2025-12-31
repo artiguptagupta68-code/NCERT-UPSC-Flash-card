@@ -106,12 +106,11 @@ def clean_text(text):
 def load_subject_text(subject):
     texts = []
     keywords = SUBJECTS[subject]
-
-    for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in pdf.name.lower() for k in keywords):
-            text = clean_text(read_pdf(pdf))
-            if len(text.split()) > 80:
-                texts.append(text)
+for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
+    if any(k in pdf.name.lower() for k in keywords):
+        text = clean_text(read_pdf(pdf))
+        if len(text.split()) > 80:
+            texts.append(text)
 
     return texts
 
