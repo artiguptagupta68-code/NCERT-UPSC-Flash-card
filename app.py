@@ -77,10 +77,10 @@ def load_subject_text(subject):
     keywords = SUBJECTS[subject]
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        name_lower = str(pdf).replace("_", " ").lower()
-        if any(k.lower() in name_lower for k in keywords):
+        pdf_path_lower = str(pdf).lower()  # check full path too
+        if any(k in pdf_path_lower for k in keywords):
             text = clean_text(read_pdf(pdf))
-            if len(text.split()) > 50:  # include smaller PDFs too
+            if len(text.split()) > 80:
                 texts.append(text)
     return texts
 
