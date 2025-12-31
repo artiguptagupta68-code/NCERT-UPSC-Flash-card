@@ -71,7 +71,6 @@ def read_pdf(path):
         return " ".join([page.extract_text() or "" for page in reader.pages])
     except:
         return ""
-
 def load_subject_text(subject):
     texts = []
     keywords = SUBJECTS[subject]
@@ -83,6 +82,7 @@ def load_subject_text(subject):
             if len(text.split()) > 80:
                 texts.append(text)
     return texts
+
 
 
 # ===================== CHUNKING =====================
