@@ -16,12 +16,13 @@ ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
 SUBJECTS = {
-    "Polity": ["polity"],
-    "Economics": ["economics"],
-    "Sociology": ["sociology"],
-    "Psychology": ["psychology"],
-    "Business Studies": ["business"]
+    "Polity": ["polity", "political", "constitution"],
+    "Economics": ["economics", "economic"],
+    "Sociology": ["sociology", "society"],
+    "Psychology": ["psychology", "mind", "behavior"],
+    "Business Studies": ["business", "management", "commerce"]
 }
+
 
 DEPTH_CONFIG = {
     "NCERT": {"chunk_size": 3, "similarity": 0.35},
@@ -101,11 +102,11 @@ def load_subject_text(subject):
     keywords = SUBJECTS[subject]
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in pdf.name.lower() for k in keywords):
-            text = clean_text(read_pdf(pdf))
-            if len(text.split()) > 80:
-                texts.append(text)
-
+    pdf_name = pdf.stem.lower()
+    if any(k in pdf_name for k in keywords):
+        text = clean_text(read_pdf(pdf))
+        if len(text.split()) > 80:
+            texts.append(text)
     return texts
 
 # ================================
