@@ -109,17 +109,16 @@ def read_pdf(path):
 # =====================================================
 def load_subject_text(subject):
     texts = []
-    keywords = SUBJECTS[subject]
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        path_lower = str(pdf).lower()
-        if any(k in path_lower for k in keywords):
-            content = read_pdf(pdf)
-            if len(content.split()) > 150:
-                texts.append(content)
+        try:
+            text = read_pdf(pdf)
+            if len(text.split()) > 300:   # real content check
+                texts.append(text)
+        except:
+            continue
 
     return texts
-
 
 # =====================================================
 # CHUNKING
