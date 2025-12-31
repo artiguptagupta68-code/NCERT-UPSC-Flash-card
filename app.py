@@ -58,12 +58,12 @@ def download_and_extract():
 
 # ===================== CLEAN TEXT =====================
 def clean_text(text):
-    # Remove emails, page numbers, editor names, multiple caps, headers/footers
-    text = re.sub(r"\S+@\S+", " ", text)  # emails
-    text = re.sub(r"(Prelims\.indd|Page \d+|Reprint).*", " ", text)
-    text = re.sub(r"[A-Z]{2,}", " ", text)  # ALL CAPS words
+    text = re.sub(r"(activity|exercise|project|editor|reprint|isbn|copyright|email|Prelims\.indd).*", " ", text, flags=re.I)
     text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    # keep only sentences of reasonable length
+    sentences = re.split(r'(?<=[.?!])\s+', text)
+    sentences = [s.strip() for s in sentences if 5 <= len(s.split()) <= 40]
+    return " ".join(sentences)
 
 def read_pdf(path):
     try:
@@ -85,69 +85,71 @@ def load_subject_text(subject):
 
 
 
-# ===================== CHUNKING =====================
-def chunk_text(text, chunk_size=5):
-    sentences = re.split(r"(?<=[.?!])\s+", text)
-    sentences = [s for s in sentences if len(s.split()) > 5]
 
+
+# ===================== CHUNKING =====================
+def chunk_text(text, chunk_size=3):
+    sentences = re.split(r'(?<=[.?!])\s+', text)
+    sentences = [s for s in sentences if 5 <= len(s.split()) <= 40]
     chunks = []
-    current = []
-    for s in sentences:
-        current.append(s)
-        if len(current) >= chunk_size:
-            chunks.append(" ".join(current))
-            current = []
-    if current:
-        chunks.append(" ".join(current))
+    for i in range(0, len(sentences), chunk_size):
+        chunks.append(" ".join(sentences[i:i+chunk_size]))
     return chunks
+
 
 # ===================== LOAD EMBEDDING =====================
 @st.cache_resource
-def load_embedding_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+def load_embedder():
+    return SentenceTransformer(EMBEDDING_MODEL)
 
-model = load_embedding_model()
+model = load_embedder()
+
 
 # ===================== FLASHCARD GENERATION =====================
-def generate_flashcards(chunks, topic, depth):
+def generate_flashcards(chunks, topic, depth="NCERT"):
     if not chunks:
-        return []
-
-    embeddings = model.encode(chunks)
-    query = model.encode([topic])
-    sims = cosine_similarity(query, embeddings)[0]
-
+        return None
+    
+    chunk_size = DEPTH_CONFIG[depth]["chunk_size"]
     threshold = DEPTH_CONFIG[depth]["similarity"]
-    top_k = DEPTH_CONFIG[depth]["top_k"]
-
+    
+    # Create embeddings
+    embeddings = model.encode(chunks)
+    query_emb = model.encode([topic])
+    sims = cosine_similarity(query_emb, embeddings)[0]
+    
+    # Rank chunks
     ranked = sorted(zip(chunks, sims), key=lambda x: x[1], reverse=True)
-    selected = [c for c, s in ranked if s >= threshold][:top_k]
-
+    selected = [c for c, s in ranked if s >= threshold][:TOP_K]
+    
+    # Build flashcards
     flashcards = []
-    for c in selected:
-        sents = re.split(r"(?<=[.?!])\s+", c)
-        if len(sents) >= 2:
+    for idx, c in enumerate(selected):
+        sentences = re.split(r'(?<=[.?!])\s+', c)
+        if len(sentences) >= 2:
             flashcards.append({
-                "overview": sents[0],
-                "explanation": " ".join(sents[1:4])
+                "overview": sentences[0],
+                "explanation": " ".join(sentences[1:])
             })
     return flashcards
 
-# ===================== SUMMARIZATION =====================
-@st.cache_resource
-def load_summarizer():
-    return pipeline("summarization", model="google/flan-t5-base", tokenizer="google/flan-t5-base")
-
-summarizer = load_summarizer()
-
-def summarize_flashcards(cards, topic):
-    if not cards:
+def summarize_flashcards(flashcards, topic):
+    if not flashcards:
         return None
-    combined_text = " ".join([c["overview"] + ". " + c["explanation"] for c in cards])
-    summary = summarizer(
-        combined_text, max_length=250, min_length=100, do_sample=False
-    )[0]["summary_text"]
-    return f"### 📘 {topic} (Summarized)\n\n{summary}"
+    overview = flashcards[0]["overview"]
+    explanation = " ".join([f["explanation"] for f in flashcards[:3]])
+    return f"""
+### 📘 {topic}
+
+**Concept Overview**  
+{overview}
+
+**Explanation**  
+{explanation}
+
+**Conclusion**  
+This concept is important for understanding governance, rights, and social structures in society.
+"""
 
 # ===================== UI =====================
 download_and_extract()
