@@ -2,122 +2,136 @@ import os
 import zipfile
 import re
 from pathlib import Path
+
 import streamlit as st
 import gdown
 from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
-# -----------------------------
+
+# =====================================================
 # CONFIG
-# -----------------------------
+# =====================================================
 FILE_ID = "1gdiCsGOeIyaDlJ--9qon8VTya3dbjr6G"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-# -----------------------------
-# DOWNLOAD & EXTRACT ZIP
-# -----------------------------
+SUBJECTS = {
+    "Polity": ["polity"],
+    "Economics": ["economics"],
+    "Sociology": ["sociology"],
+    "Psychology": ["psychology"],
+    "Business Studies": ["business"]
+}
+
+SIM_THRESHOLD = 0.35
+
+# =====================================================
+# STREAMLIT CONFIG
+# =====================================================
+st.set_page_config("NCERT Flashcards", layout="wide")
+st.title("📘 NCERT Flashcard Generator")
+
+# =====================================================
+# LOAD EMBEDDING MODEL
+# =====================================================
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+model = load_model()
+
+# =====================================================
+# DOWNLOAD & EXTRACT ZIP (FULLY)
+# =====================================================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
         st.info("📥 Downloading NCERT ZIP...")
-        gdown.download(
-            f"https://drive.google.com/uc?id={FILE_ID}",
-            ZIP_PATH,
-            quiet=False
-        )
+        gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    # Extract main zip
-    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
-        zip_ref.extractall(EXTRACT_DIR)
+    def extract_all(zip_path, out_dir):
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(out_dir)
 
-    # Extract nested zips safely
-    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
-        try:
-            target = zfile.parent / zfile.stem
-            target.mkdir(exist_ok=True)
-            with zipfile.ZipFile(zfile, "r") as inner:
-                inner.extractall(target)
-        except Exception as e:
-            st.warning(f"Skipped corrupted zip: {zfile}")
+        for zfile in Path(out_dir).rglob("*.zip"):
+            try:
+                target = zfile.parent / zfile.stem
+                target.mkdir(exist_ok=True)
+                with zipfile.ZipFile(zfile, "r") as inner:
+                    inner.extractall(target)
+                zfile.unlink()
+            except:
+                pass
 
-    st.success("✅ NCERT PDFs extracted successfully")
+    extract_all(ZIP_PATH, EXTRACT_DIR)
+    st.success("✅ All NCERT PDFs extracted successfully")
 
-# -----------------------------
-# READ PDF TEXT SAFELY
-# -----------------------------
+# =====================================================
+# PDF READING
+# =====================================================
 def read_pdf(path):
     try:
         reader = PdfReader(path)
         text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + " "
+        for p in reader.pages:
+            if p.extract_text():
+                text += p.extract_text() + " "
         return text.strip()
-    except Exception:
+    except:
         return ""
 
-# -----------------------------
+# =====================================================
 # CLEAN TEXT
-# -----------------------------
+# =====================================================
 def clean_text(text):
-    text = re.sub(
-        r"(activity|let us|exercise|project|editor|reprint|copyright|isbn).*",
-        " ",
-        text,
-        flags=re.I,
-    )
+    text = re.sub(r"(activity|exercise|project|copyright|isbn|reprint).*", " ", text, flags=re.I)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-# -----------------------------
-# LOAD ALL PDF TEXTS
-# -----------------------------
-def load_all_texts():
+# =====================================================
+# LOAD SUBJECT TEXT
+# =====================================================
+def load_subject_text(subject):
+    keywords = SUBJECTS[subject]
     texts = []
-    valid_files = []
 
-    for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        text = clean_text(read_pdf(pdf))
-        if len(text.split()) > 80:  # important threshold
-            texts.append(text)
-            valid_files.append(str(pdf))
+    pdfs = list(Path(EXTRACT_DIR).rglob("*.pdf"))
+    st.write(f"📄 Total PDFs found: {len(pdfs)}")
 
-    st.write(f"📄 Loaded {len(valid_files)} PDFs with readable content:")
-    for f in valid_files:
-        st.write("•", f)
-
-    if not texts:
-        st.warning("⚠️ No readable content found. PDFs may be scanned images.")
+    for pdf in pdfs:
+        name = pdf.name.lower()
+        if any(k in name for k in keywords):
+            text = clean_text(read_pdf(pdf))
+            if len(text.split()) > 100:
+                texts.append(text)
 
     return texts
 
-
-# ======================================================
-# SEMANTIC CHUNKING
-# ======================================================
+# =====================================================
+# CHUNKING
+# =====================================================
 def chunk_text(text):
-    sentences = re.split(r"(?<=[.?!])\s+", text)
-    sentences = [s for s in sentences if is_valid_sentence(s)]
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    sentences = [s for s in sentences if len(s.split()) > 6]
 
-    chunks = []
-    current = []
-
+    chunks, buffer = [], []
     for s in sentences:
-        current.append(s)
-        if len(current) >= 5:
-            chunks.append(" ".join(current))
-            current = []
+        buffer.append(s)
+        if len(buffer) >= 5:
+            chunks.append(" ".join(buffer))
+            buffer = []
 
-    if current:
-        chunks.append(" ".join(current))
+    if buffer:
+        chunks.append(" ".join(buffer))
 
     return chunks
 
-# ======================================================
+# =====================================================
 # FLASHCARD GENERATION
-# ======================================================
+# =====================================================
 def generate_flashcards(chunks, topic):
     embeddings = model.encode(chunks)
     query_vec = model.encode([topic])
@@ -125,12 +139,9 @@ def generate_flashcards(chunks, topic):
     scores = cosine_similarity(query_vec, embeddings)[0]
     ranked = sorted(zip(chunks, scores), key=lambda x: x[1], reverse=True)
 
-    good_chunks = [c for c, s in ranked if s > SIM_THRESHOLD][:6]
-
     flashcards = []
-    for ch in good_chunks:
-        sents = re.split(r"(?<=[.?!])\s+", ch)
-        sents = [s for s in sents if is_valid_sentence(s)]
+    for chunk, score in ranked[:6]:
+        sents = re.split(r"(?<=[.!?])\s+", chunk)
         if len(sents) >= 3:
             flashcards.append({
                 "overview": sents[0],
@@ -139,9 +150,9 @@ def generate_flashcards(chunks, topic):
 
     return flashcards
 
-# ======================================================
-# SUMMARY FLASHCARD
-# ======================================================
+# =====================================================
+# SUMMARY CARD
+# =====================================================
 def summarize_flashcards(cards, topic):
     if not cards:
         return None
@@ -159,31 +170,31 @@ def summarize_flashcards(cards, topic):
 {explanation}
 
 **Conclusion**  
-This concept plays a foundational role in understanding governance, rights, and social structure in a democratic system.
+This concept is fundamental for understanding governance, institutions, and democratic principles.
 """
 
-# ======================================================
+# =====================================================
 # UI
-# ======================================================
+# =====================================================
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
 topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
-if st.button("Generate Flashcard"):
+if st.button("Generate Flashcards"):
     texts = load_subject_text(subject)
 
     if not texts:
-        st.warning("No readable content found for this subject.")
+        st.error("❌ No readable content found for this subject.")
     else:
         chunks = []
         for t in texts:
             chunks.extend(chunk_text(t))
 
-        flashcards = generate_flashcards(chunks, topic)
-        final_card = summarize_flashcards(flashcards, topic)
+        cards = generate_flashcards(chunks, topic)
+        final = summarize_flashcards(cards, topic)
 
-        if final_card:
-            st.markdown(final_card)
+        if final:
+            st.markdown(final)
         else:
-            st.warning("No meaningful content found for this topic.")
+            st.warning("⚠️ Not enough relevant content found.")
