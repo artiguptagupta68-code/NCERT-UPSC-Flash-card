@@ -13,7 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # =====================================================
 # CONFIG
 # =====================================================
-FILE_ID = "1gdiCsGOeIyaDlJ--9qon8VTya3dbjr6G"
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
