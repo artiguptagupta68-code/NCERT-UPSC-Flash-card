@@ -170,25 +170,7 @@ def load_subject_text(subject):
     return texts
 
 # =====================================================
-# CHUNKING
-# =====================================================
-def chunk_text(text, depth):
-    sentences = re.split(r"(?<=[.?!])\s+", text)
-    sentences = [s for s in sentences if len(s.split()) > 6]
-
-    size = DEPTH_CONFIG[depth]["chunk_size"]
-    chunks, temp = [], []
-
-    for s in sentences:
-        temp.append(s)
-        if len(temp) >= size:
-            chunks.append(" ".join(temp))
-            temp = []
-
-    if temp:
-        chunks.append(" ".join(temp))
-
-    return chunks
+#s
 
 # =====================================================
 # FLASHCARD GENERATION
