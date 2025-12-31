@@ -77,10 +77,10 @@ def load_subject_text(subject):
     keywords = SUBJECTS[subject]
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        name_lower = pdf.stem.replace("_", " ").lower()
+        name_lower = str(pdf).replace("_", " ").lower()
         if any(k.lower() in name_lower for k in keywords):
             text = clean_text(read_pdf(pdf))
-            if len(text.split()) > 50:  # lower threshold
+            if len(text.split()) > 50:  # include smaller PDFs too
                 texts.append(text)
     return texts
 
