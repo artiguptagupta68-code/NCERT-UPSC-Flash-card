@@ -17,15 +17,27 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 import gdown
 
-FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
-ZIP_PATH = "ncert.zip"
+FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ/view?usp=drive_link"
+ZIP_PATH = "ncrt.zip"
 EXTRACT_DIR = "ncert_extracted"
-gdown.download(
-    url=f"https://drive.google.com/uc?id={FILE_ID}",
-    output=ZIP_PATH,
-    quiet=False,
-    fuzzy=True  # important for gdown to parse the URL correctly
-)
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+GEN_MODEL_NAME = "google/flan-t5-base"
+TOP_K = 4
+
+# STEP 1: Download ZIP
+# ----------------------------
+
+EXTRACT_DIR = "/content/ncert_extracted"
+ZIP_PATH = "/content/drive/MyDrive/ncrt subject.zip"
+
+import zipfile, os
+os.makedirs(EXTRACT_DIR, exist_ok=True)
+
+with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+    zip_ref.extractall(EXTRACT_DIR)
+
 
 SUBJECTS = {
     "Polity": ["polity"],
@@ -39,6 +51,62 @@ DEPTH_CONFIG = {
     "NCERT": {"chunk_size": 3, "similarity": 0.35},
     "UPSC": {"chunk_size": 6, "similarity": 0.45}
 }
+#STEP 3: Extract ZIP
+# ----------------------------
+os.makedirs(EXTRACT_DIR, exist_ok=True)
+with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+    zip_ref.extractall(EXTRACT_DIR)
+st.text(f"ZIP extracted to: {EXTRACT_DIR}")
+
+# Handle nested ZIPs (like class 11/12 PDFs inside)
+for root, dirs, files in os.walk(EXTRACT_DIR):
+    for file in files:
+        if file.lower().endswith(".zip"):
+            nested_zip_path = os.path.join(root, file)
+            nested_extract_dir = os.path.join(root, Path(file).stem)
+            os.makedirs(nested_extract_dir, exist_ok=True)
+            with zipfile.ZipFile(nested_zip_path, 'r') as nz:
+                nz.extractall(nested_extract_dir)
+
+st.text("All nested ZIPs extracted.")
+print ("All nested ZIPs extracted.")
+
+#STEP 3: Extract ZIP
+# ----------------------------
+os.makedirs(EXTRACT_DIR, exist_ok=True)
+with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+    zip_ref.extractall(EXTRACT_DIR)
+st.text(f"ZIP extracted to: {EXTRACT_DIR}")
+
+# Handle nested ZIPs (like class 11/12 PDFs inside)
+for root, dirs, files in os.walk(EXTRACT_DIR):
+    for file in files:
+        if file.lower().endswith(".zip"):
+            nested_zip_path = os.path.join(root, file)
+            nested_extract_dir = os.path.join(root, Path(file).stem)
+            os.makedirs(nested_extract_dir, exist_ok=True)
+            with zipfile.ZipFile(nested_zip_path, 'r') as nz:
+                nz.extractall(nested_extract_dir)
+
+st.text("All nested ZIPs extracted.")
+print ("All nested ZIPs extracted.")
+
+from pypdf import PdfReader
+pdf_count = 0
+text_pages = 0
+
+for root, _, files in os.walk(EXTRACT_DIR):
+    for file in files:
+        if file.lower().endswith(".pdf"):
+            pdf_count += 1
+            path = os.path.join(root, file)
+            reader = PdfReader(path)
+            for page in reader.pages:
+                if page.extract_text():
+                    text_pages += 1
+
+print("Total PDFs found:", pdf_count)
+print("Pages with extractable text:", text_pages)
 
 # =====================================================
 # STREAMLIT SETUP
@@ -82,20 +150,7 @@ def download_and_extract():
 
     st.success("✅ NCERT PDFs extracted successfully")
 
-# =====================================================
-# PDF READING
-# =====================================================
-def read_pdf(path):
-    try:
-        reader = PdfReader(path)
-        text = ""
-        for page in reader.pages:
-            t = page.extract_text()
-            if t:
-                text += t + " "
-        return text
-    except:
-        return ""
+
 
 def clean_text(text):
     text = re.sub(r"(activity|exercise|project|reprint|isbn|copyright).*", " ", text, flags=re.I)
