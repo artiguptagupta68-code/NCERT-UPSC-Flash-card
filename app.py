@@ -82,29 +82,25 @@ model = load_model()
 
 
 # ================= FLASHCARD LOGIC =================
-def generate_flashcard(texts, topic):
-    """
-    1. Read all text
-    2. Find semantically relevant chunks
-    3. Compress meaning
-    4. Generate clean conceptual flashcard
-    """
-
+def generate_single_flashcard(texts, topic, depth="NCERT"):
     if not texts:
         return "⚠️ No readable content found."
 
-    # -------- STEP 1: CHUNKING --------
+    # ---------- STEP 1: CLEAN & CHUNK ----------
     chunks = []
     for text in texts:
+        text = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*|University.*)", " ", text)
+        text = re.sub(r"\s+", " ", text)
+
         sentences = re.split(r'(?<=[.!?])\s+', text)
         buffer = []
 
         for s in sentences:
-            if len(s.split()) < 6:
+            if len(s.split()) < 7:
                 continue
             buffer.append(s)
 
-            if len(" ".join(buffer).split()) >= 120:
+            if len(" ".join(buffer).split()) >= 150:
                 chunks.append(" ".join(buffer))
                 buffer = []
 
@@ -114,36 +110,40 @@ def generate_flashcard(texts, topic):
     if not chunks:
         return "⚠️ No meaningful content found."
 
-    # -------- STEP 2: SEMANTIC MATCHING --------
+    # ---------- STEP 2: SEMANTIC FILTER ----------
     topic_vec = model.encode([topic])
     chunk_vecs = model.encode(chunks)
 
     scored = []
-    for chunk, vec in zip(chunks, chunk_vecs):
-        score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.35:   # semantic relevance threshold
-            scored.append((chunk, score))
+    for c, v in zip(chunks, chunk_vecs):
+        score = cosine_similarity([v], topic_vec)[0][0]
+        if score > 0.35:
+            scored.append((c, score))
 
     if not scored:
         return "⚠️ Topic not found in NCERT content."
 
+    # Sort by relevance
     scored.sort(key=lambda x: x[1], reverse=True)
-    best_chunks = [c for c, _ in scored[:3]]
 
-    # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
-    joined = " ".join(best_chunks)
+    # ---------- STEP 3: MERGE CONTEXT (IMPORTANT FIX) ----------
+    merged_context = " ".join([c for c, _ in scored[:5]])
 
-    # Clean remaining junk
-    joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
-    joined = re.sub(r"\s+", " ", joined)
+    # Remove dangling transitions like "Secondly", "Firstly"
+    merged_context = re.sub(
+        r"\b(Firstly|Secondly|Thirdly|Moreover|Further|Additionally),?\b",
+        "",
+        merged_context,
+        flags=re.I
+    )
 
-    sentences = re.split(r'(?<=[.!?])\s+', joined)
+    # ---------- STEP 4: STRUCTURED SUMMARIZATION ----------
+    sentences = re.split(r'(?<=[.!?])\s+', merged_context)
 
     concept = " ".join(sentences[:4])
-    explanation = " ".join(sentences[4:8])
+    explanation = " ".join(sentences[4:9])
 
-    # -------- STEP 4: STRUCTURED FLASHCARD --------
-    flashcard = f"""
+    return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
@@ -153,12 +153,11 @@ def generate_flashcard(texts, topic):
 {explanation}
 
 **Why It Matters**
-- Builds conceptual clarity  
-- Helps in analytical and application-based questions  
-- Important for NCERT & UPSC preparation  
+- Helps understand evolving constitutional interpretation  
+- Strengthens analytical thinking for UPSC & NCERT  
+- Connects theory with real-life governance  
 """
 
-    return flashcard
  
 
 # ================= UI =================
