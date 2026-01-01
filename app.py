@@ -112,53 +112,95 @@ def classify_sentences(sentences):
 
 
 # ===================== LOAD EMBEDDING MODEL =====================
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+# Load embedding model
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
-model = load_model()
+def clean_text(text):
+    """Remove garbage, metadata, and noise"""
+    patterns = [
+        r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
+        r"All rights reserved.*", r"University.*",
+        r"Editor.*", r"Department.*", r"Email:.*",
+        r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
+        r"Prelims\.indd.*",
+    ]
+
+    for p in patterns:
+        text = re.sub(p, " ", text, flags=re.I)
+
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
-# ===================== FLASHCARD GENERATION =====================
-def build_flashcard(texts, topic):
-    full_text = " ".join(texts)
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)
-    sentences = [s for s in sentences if len(s.split()) > 8]
+def chunk_text(text, min_words=30, max_words=120):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks, buffer = [], []
 
-    if not sentences:
+    for s in sentences:
+        if len(s.split()) < 6:
+            continue
+        buffer.append(s)
+        if sum(len(x.split()) for x in buffer) >= max_words:
+            chunks.append(" ".join(buffer))
+            buffer = []
+
+    if buffer:
+        chunks.append(" ".join(buffer))
+
+    return chunks
+
+
+def generate_flashcard(text, topic):
+    text = clean_text(text)
+    chunks = chunk_text(text)
+
+    if not chunks:
         return "⚠️ No meaningful content found."
 
-    # Semantic similarity filtering
     topic_vec = model.encode([topic])
-    sent_vecs = model.encode(sentences)
+    chunk_vecs = model.encode(chunks)
 
-    relevant = [
-        s for s, v in zip(sentences, sent_vecs)
-        if cosine_similarity([v], topic_vec)[0][0] > 0.40
+    scored = [
+        (chunk, cosine_similarity([vec], topic_vec)[0][0])
+        for chunk, vec in zip(chunks, chunk_vecs)
     ]
+
+    # Keep only relevant chunks
+    relevant = [c for c, s in scored if s > 0.35]
 
     if not relevant:
         return "⚠️ No meaningful content found."
 
-    definition, working, importance = classify_sentences(relevant)
+    combined = " ".join(relevant[:3])
 
     return f"""
-### 📘 {topic} — Concept Flashcard
+### 📘 {topic} — Concept Summary
 
-**What is it?**  
-{definition[0] if definition else "Defines the concept under the Indian Constitution."}
+**Concept Overview**  
+{combined}
 
-**How does it work?**  
-{' '.join(working[:2]) if working else "It operates through constitutional provisions and judicial interpretation."}
+**Why It Matters**
+- Strengthens understanding of constitutional principles  
+- Explains how rights evolve with society  
+- Important for analytical answers in NCERT & UPSC  
 
-**Why is it important?**  
-{' '.join(importance[:2]) if importance else "It safeguards democratic values and fundamental rights."}
-
-**Exam Relevance**
-- High weightage in NCERT & UPSC  
-- Frequently used in analytical questions  
 """
+
+
+# ================== EXAMPLE USAGE ==================
+
+text_input = """
+The fundamental rights guaranteed by the Constitution are dynamic in nature.
+They evolve through judicial interpretation to address new challenges.
+The right to life has expanded to include dignity, livelihood, and privacy.
+The Constitution ensures democratic values and inclusive citizenship.
+"""
+
+topic = "Constitution"
+
+flashcard = generate_flashcard(text_input, topic)
+print(flashcard)
 
 
 # ===================== STREAMLIT UI =====================
