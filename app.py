@@ -14,6 +14,14 @@ FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
+SUBJECTS = {
+    "Polity": ["polity", "constitution"],
+    "Economics": ["economics"],
+    "Sociology": ["sociology"],
+    "Psychology": ["psychology"],
+    "Business Studies": ["business"]
+}
+
 # ================= STREAMLIT =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
 st.title("📘 NCERT → Smart Concept Flashcard")
@@ -41,15 +49,19 @@ def download_and_extract():
             pass
 
 
-# ================= CLEANING =================
+# ================= CLEAN TEXT =================
 def clean_text(text):
-    junk = [
-        r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
-        r"All rights reserved.*", r"University.*", r"Editor.*",
-        r"Copyright.*", r"\d{1,2}\s[A-Za-z]+\s\d{4}"
+    patterns = [
+        r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
+        r"All rights reserved.*", r"University.*",
+        r"Editor.*", r"Department.*", r"Email:.*",
+        r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
+        r"Prelims\.indd.*"
     ]
-    for j in junk:
-        text = re.sub(j, " ", text, flags=re.I)
+
+    for p in patterns:
+        text = re.sub(p, " ", text, flags=re.I)
+
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -64,16 +76,20 @@ def read_pdf(path):
 
 
 # ================= LOAD ALL TEXT =================
-def load_all_text():
+def load_all_text(subject):
     texts = []
+    keywords = SUBJECTS.get(subject, [])
+
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        txt = read_pdf(pdf)
-        if len(txt.split()) > 200:
-            texts.append(txt)
+        if any(k in str(pdf).lower() for k in keywords):
+            content = read_pdf(pdf)
+            if len(content.split()) > 50:
+                texts.append(content)
+
     return texts
 
 
-# ================= EMBEDDINGS =================
+# ================= EMBEDDING MODEL =================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -81,94 +97,74 @@ def load_model():
 model = load_model()
 
 
-# ================= FLASHCARD LOGIC =================
+# ================= FLASHCARD GENERATOR =================
 def generate_flashcard(texts, topic):
-    """
-    1. Read all text
-    2. Find semantically relevant chunks
-    3. Compress meaning
-    4. Generate clean conceptual flashcard
-    """
+    combined = " ".join(texts)
+    combined = clean_text(combined)
 
-    if not texts:
-        return "⚠️ No readable content found."
-
-    # -------- STEP 1: CHUNKING --------
-    chunks = []
-    for text in texts:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        buffer = []
-
-        for s in sentences:
-            if len(s.split()) < 6:
-                continue
-            buffer.append(s)
-
-            if len(" ".join(buffer).split()) >= 120:
-                chunks.append(" ".join(buffer))
-                buffer = []
-
-        if buffer:
-            chunks.append(" ".join(buffer))
-
-    if not chunks:
+    if len(combined.split()) < 80:
         return "⚠️ No meaningful content found."
 
-    # -------- STEP 2: SEMANTIC MATCHING --------
+    # Split into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', combined)
+
+    # Create chunks
+    chunks, buffer = [], []
+    for s in sentences:
+        if len(s.split()) < 6:
+            continue
+        buffer.append(s)
+        if sum(len(x.split()) for x in buffer) >= 120:
+            chunks.append(" ".join(buffer))
+            buffer = []
+
+    if buffer:
+        chunks.append(" ".join(buffer))
+
+    # Semantic similarity
     topic_vec = model.encode([topic])
     chunk_vecs = model.encode(chunks)
 
-    scored = []
-    for chunk, vec in zip(chunks, chunk_vecs):
-        score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.75:   # semantic relevance threshold
-            scored.append((chunk, score))
-
-    if not scored:
-        return "⚠️ Topic not found in NCERT content."
+    scored = [
+        (chunk, cosine_similarity([vec], topic_vec)[0][0])
+        for chunk, vec in zip(chunks, chunk_vecs)
+    ]
 
     scored.sort(key=lambda x: x[1], reverse=True)
-    best_chunks = [c for c, _ in scored[:3]]
 
-    # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
-    joined = " ".join(best_chunks)
+    # Fallback logic
+    if not scored:
+        return "⚠️ No meaningful content found."
 
-    # Clean remaining junk
-    joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
-    joined = re.sub(r"\s+", " ", joined)
+    if scored[0][1] < 0.25:
+        selected = scored[0][0]
+    else:
+        selected = " ".join([c for c, _ in scored[:2]])
 
-    sentences = re.split(r'(?<=[.!?])\s+', joined)
-
-    concept = " ".join(sentences[:4])
-    explanation = " ".join(sentences[4:8])
-
-    # -------- STEP 4: STRUCTURED FLASHCARD --------
-    flashcard = f"""
+    return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
-{concept}
-
-**Explanation**  
-{explanation}
+{selected}
 
 **Why It Matters**
 - Builds conceptual clarity  
-- Helps in analytical and application-based questions  
-- Important for NCERT & UPSC preparation  
+- Helps in analytical & application-based questions  
+- Frequently tested in NCERT & UPSC  
 """
 
-    return flashcard
 
-
- 
-
-# ================= UI =================
+# ================= STREAMLIT UI =================
 download_and_extract()
 
-topic = st.text_input("Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)")
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
-if st.button("Generate Flashcard"):
-    texts = load_all_text()
-    result = generate_flashcard(texts, topic)
-    st.markdown(result)
+if st.button("Generate Flashcard") and topic.strip():
+    texts = load_all_text(subject)
+
+    if not texts:
+        st.warning("⚠️ No readable content found for this subject.")
+    else:
+        flashcard = generate_flashcard(texts, topic)
+        st.markdown(flashcard)
