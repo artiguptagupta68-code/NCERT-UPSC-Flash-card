@@ -177,36 +177,71 @@ def deduplicate(chunks, threshold=0.85):
 # =====================================================
 # FLASHCARD GENERATION
 # =====================================================
-def generate_flashcards(chunks, topic):
-    flashcards = []
-    for c in chunks:
-        sents = re.split(r'(?<=[.!?])\s+', c)
-        if len(sents) < 2:
+def generate_single_flashcard(texts, topic, depth="NCERT"):
+    """
+    Generates ONE clean summarized flashcard for a topic
+    """
+
+    # Step 1: Clean text
+    cleaned = []
+    for t in texts:
+        t = re.sub(r"(Prelims\.indd.*|ISBN.*|Printed.*|©.*|All rights reserved.*|University.*|Editor.*|Professor.*)", " ", t, flags=re.I)
+        t = re.sub(r"\s+", " ", t)
+        if len(t.split()) > 80:
+            cleaned.append(t)
+
+    if not cleaned:
+        return "⚠️ No readable content found for this subject."
+
+    full_text = " ".join(cleaned)
+
+    # Step 2: Chunking (large conceptual chunks)
+    sentences = re.split(r'(?<=[.!?])\s+', full_text)
+    chunks, temp = [], []
+
+    for s in sentences:
+        if len(s.split()) < 6:
             continue
-        overview = sents[0]
-        explanation = " ".join(sents[1:4])
-        flashcards.append({
-            "overview": overview,
-            "explanation": explanation
-        })
-    return flashcards
-def summarize_flashcards(flashcards, topic):
-    if not flashcards:
-        return None
-    overview = flashcards[0]["overview"]
-    explanation = " ".join([f["explanation"] for f in flashcards[:4]])
-    return f"""
-### 📘 {topic} (Summary)
+        temp.append(s)
+        if sum(len(x.split()) for x in temp) >= 200:
+            chunks.append(" ".join(temp))
+            temp = []
+
+    if temp:
+        chunks.append(" ".join(temp))
+
+    # Step 3: Semantic filtering
+    topic_emb = model.encode([topic])
+    chunk_emb = model.encode(chunks)
+
+    threshold = 0.35 if depth == "NCERT" else 0.45
+    relevant = [
+        c for c, e in zip(chunks, chunk_emb)
+        if cosine_similarity([e], topic_emb)[0][0] >= threshold
+    ]
+
+    if not relevant:
+        return "⚠️ No readable content found for this subject."
+
+    # Step 4: Summarization (single flashcard)
+    combined = " ".join(relevant[:3])
+
+    sentences = re.split(r'(?<=[.!?])\s+', combined)
+    core = " ".join(sentences[:6])
+
+    flashcard = f"""
+### 📘 {topic} — Concept Summary
+
 **Concept Overview**  
-{overview}
+{core}
 
-**Explanation**  
-{explanation}
-
-**Why it Matters**
-- Understand key rights & governance  
-- Useful for UPSC & NCERT exams
+**Why It Matters**
+- Builds conceptual clarity  
+- Links theory with real-life understanding  
+- Important for NCERT & UPSC exams  
 """
+
+    return flashcard
 
 
 
@@ -222,18 +257,10 @@ topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
 
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        chunks = []
-        for t in texts:
-            chunks.extend(chunk_text(t))
+result = generate_single_flashcard(
+    texts=texts,
+    topic=topic,
+    depth=depth
+)
 
-        chunks = deduplicate(chunks)
-
-        card = generate_flashcard(chunks, topic, depth)
-
-        if card:
-            st.markdown(card)
-        else:
-            st.warning("No relevant conceptual content found.")
+st.markdown(result)
