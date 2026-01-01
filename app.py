@@ -258,7 +258,7 @@ if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
 
 result = generate_single_flashcard(
-    texts=texts,
+    texts = load_subject_text(subject),
     topic=topic,
     depth=depth
 )
