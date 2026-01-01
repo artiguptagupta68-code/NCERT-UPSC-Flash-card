@@ -17,62 +17,68 @@ ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
 SUBJECTS = {
-    "Polity": ["polity", "constitution"],
+    "Polity": ["constitution", "polity"],
     "Economics": ["economics"],
     "Sociology": ["sociology"],
     "Psychology": ["psychology"],
-    "Business Studies": ["business"]
+    "Business Studies": ["business"],
 }
-
-# =====================================================
-# STREAMLIT
-# =====================================================
-st.set_page_config("NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT Concept Flashcard Generator")
 
 # =====================================================
 # DOWNLOAD & EXTRACT
 # =====================================================
+
 def download_and_extract():
-    if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT ZIP...")
-        gdown.download(
-            f"https://drive.google.com/uc?id={FILE_ID}",
-            ZIP_PATH,
-            quiet=False,
-            fuzzy=True
-        )
+    if not Path(ZIP_PATH).exists():
+        gdown.download(id=FILE_ID, output=ZIP_PATH, quiet=False)
 
-    os.makedirs(EXTRACT_DIR, exist_ok=True)
+    if not Path(EXTRACT_DIR).exists():
+        with zipfile.ZipFile(ZIP_PATH, 'r') as z:
+            z.extractall(EXTRACT_DIR)
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        z.extractall(EXTRACT_DIR)
-
-    # extract nested zips
-    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
-        target = zfile.parent / zfile.stem
-        os.makedirs(target, exist_ok=True)
-        with zipfile.ZipFile(zfile, "r") as inner:
-            inner.extractall(target)
-
-    st.success("✅ NCERT PDFs extracted")
+    # Extract nested zips
+    for z in Path(EXTRACT_DIR).rglob("*.zip"):
+        try:
+            target = z.parent / z.stem
+            target.mkdir(exist_ok=True)
+            with zipfile.ZipFile(z, 'r') as inner:
+                inner.extractall(target)
+        except:
+            pass
 
 # =====================================================
-# CLEANING FUNCTIONS
+# CLEANING + FILTERING
 # =====================================================
-def clean_text(text):
-    junk = [
-        r"ISBN.*", r"Reprint.*", r"Printed.*", r"Published.*",
-        r"Editor.*", r"University.*", r"Department.*",
-        r"Copyright.*", r"All rights reserved.*",
-        r"\d{1,2}\s[A-Za-z]+\s\d{4}", r"Prelims\.indd.*"
+
+def is_conceptual(sentence: str) -> bool:
+    s = sentence.lower()
+
+    if len(s.split()) < 8:
+        return False
+
+    blacklist = [
+        "isbn", "reprint", "printed", "publisher", "publication",
+        "department", "editor", "email", "address", "price",
+        "copyright", "reserved", "ncert", "press",
+        "committee", "advisor", "secretary", "design",
+        "distributed", "sold subject"
     ]
-    for j in junk:
-        text = re.sub(j, " ", text, flags=re.I)
 
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    if any(b in s for b in blacklist):
+        return False
 
+    concept_words = [
+        "constitution", "rights", "liberty", "equality",
+        "democracy", "citizen", "state", "government",
+        "law", "justice", "freedom", "society", "political"
+    ]
+
+    return any(w in s for w in concept_words)
+
+
+# =====================================================
+# PDF READING
+# =====================================================
 
 def read_pdf(path):
     try:
@@ -81,41 +87,18 @@ def read_pdf(path):
         for page in reader.pages:
             if page.extract_text():
                 text += page.extract_text() + " "
-        return clean_text(text)
+        return text
     except:
         return ""
 
 
-# =====================================================
-# LOAD TEXTS
-# =====================================================
 def load_subject_text(subject):
     texts = []
-    keywords = SUBJECTS[subject]
-
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in str(pdf).lower() for k in keywords):
-            t = read_pdf(pdf)
-            if len(t.split()) > 200:
-                texts.append(t)
-
+        text = read_pdf(pdf)
+        if len(text.split()) > 300:
+            texts.append(text)
     return texts
-
-
-# =====================================================
-# FILTER MEANINGFUL SENTENCES
-# =====================================================
-def is_conceptual(sentence):
-    bad = [
-        "isbn", "printed", "editor", "publication", "address",
-        "price", "reprint", "office", "department"
-    ]
-    s = sentence.lower()
-    if len(s.split()) < 7:
-        return False
-    if any(b in s for b in bad):
-        return False
-    return True
 
 
 # =====================================================
@@ -129,56 +112,67 @@ model = load_model()
 
 
 # =====================================================
-# FLASHCARD GENERATOR
+# FLASHCARD GENERATION
 # =====================================================
-def generate_flashcard(texts, topic):
-    sentences = []
+
+def generate_single_flashcard(texts, topic, depth="NCERT"):
+    cleaned = []
     for t in texts:
-        for s in re.split(r'(?<=[.!?])\s+', t):
+        sents = re.split(r'(?<=[.!?])\s+', t)
+        for s in sents:
             if is_conceptual(s):
-                sentences.append(s)
+                cleaned.append(s.strip())
 
-    if not sentences:
-        return "⚠️ No meaningful content found."
+    if not cleaned:
+        return "⚠️ No readable conceptual content found."
 
-    embeddings = model.encode(sentences)
+    cleaned = list(dict.fromkeys(cleaned))[:300]
+
+    embeddings = model.encode(cleaned)
     topic_vec = model.encode([topic])
+
+    threshold = 0.35 if depth == "NCERT" else 0.45
 
     scored = [
         (s, cosine_similarity([e], topic_vec)[0][0])
-        for s, e in zip(sentences, embeddings)
+        for s, e in zip(cleaned, embeddings)
     ]
 
-    selected = [s for s, score in scored if score > 0.35]
+    selected = [s for s, score in scored if score > threshold]
 
     if not selected:
-        return "⚠️ Topic not clearly present in textbook."
+        return "⚠️ No relevant conceptual explanation found."
 
-    core = selected[:5]
+    selected = selected[:5]
 
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
-{core[0]}
+{selected[0]}
 
 **Explanation**  
-{" ".join(core[1:4])}
+{' '.join(selected[1:4])}
 
 **Why It Matters**  
-Understanding this concept helps connect constitutional principles with real-life governance and civic responsibility.
+This concept forms a core foundation of Indian polity and is frequently tested in NCERT and UPSC examinations.
 """
 
 
 # =====================================================
-# UI
+# STREAMLIT UI
 # =====================================================
+
+st.set_page_config("NCERT Flashcards", layout="wide")
+st.title("📘 NCERT + UPSC Smart Flashcard Generator")
+
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
 topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
-    result = generate_flashcard(texts, topic)
+    result = generate_single_flashcard(texts, topic, depth)
     st.markdown(result)
