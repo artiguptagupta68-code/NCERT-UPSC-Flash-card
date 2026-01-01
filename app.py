@@ -142,7 +142,7 @@ def generate_flashcard(texts, topic, depth="NCERT"):
     summary_sentences = re.split(r'(?<=[.!?])\s+', summary_text)
 
     flashcard = f"""
-### 📘 {topic} — Concept Summary
+### 📘 {topic} — Concept Summary 
 
 **Concept Overview**  
 {' '.join(summary_sentences[:6])}
