@@ -2,31 +2,34 @@ import os
 import re
 import zipfile
 from pathlib import Path
-
 import streamlit as st
-import gdown
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ================= CONFIG =================
+# ===================== CONFIG =====================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-# ================= STREAMLIT =================
-st.set_page_config("NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT → Smart Concept Flashcard")
+SUBJECTS = {
+    "Polity": ["constitution", "polity"],
+    "Economics": ["economics"],
+    "Sociology": ["sociology"],
+    "Psychology": ["psychology"],
+    "Business Studies": ["business"]
+}
 
-# ================= DOWNLOAD & EXTRACT =================
+# ===================== UI =====================
+st.set_page_config("NCERT Smart Flashcards", layout="wide")
+st.title("📘 NCERT Smart Flashcard Generator")
+
+# ===================== UTILITIES =====================
+
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
-        gdown.download(
-            f"https://drive.google.com/uc?id={FILE_ID}",
-            ZIP_PATH,
-            quiet=False,
-            fuzzy=True
-        )
+        import gdown
+        gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", ZIP_PATH, quiet=False)
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
@@ -34,22 +37,19 @@ def download_and_extract():
         zip_ref.extractall(EXTRACT_DIR)
 
     for z in Path(EXTRACT_DIR).rglob("*.zip"):
-        try:
-            with zipfile.ZipFile(z, "r") as inner:
-                inner.extractall(z.parent / z.stem)
-        except:
-            pass
+        with zipfile.ZipFile(z, "r") as inner:
+            inner.extractall(z.parent)
 
 
-# ================= CLEANING =================
 def clean_text(text):
     junk = [
-        r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
-        r"All rights reserved.*", r"University.*", r"Editor.*",
-        r"Copyright.*", r"\d{1,2}\s[A-Za-z]+\s\d{4}"
+        r"Prelims.*", r"ISBN.*", r"Printed.*", r"All rights reserved.*",
+        r"Editor.*", r"University.*", r"Department.*",
+        r"\d{4}.*", r"©.*"
     ]
     for j in junk:
         text = re.sub(j, " ", text, flags=re.I)
+
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -57,23 +57,21 @@ def clean_text(text):
 def read_pdf(path):
     try:
         reader = PdfReader(path)
-        text = " ".join(p.extract_text() or "" for p in reader.pages)
-        return clean_text(text)
+        return " ".join([p.extract_text() or "" for p in reader.pages])
     except:
         return ""
 
 
-# ================= LOAD ALL TEXT =================
-def load_all_text():
+def load_subject_text(subject):
     texts = []
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        txt = read_pdf(pdf)
-        if len(txt.split()) > 200:
-            texts.append(txt)
+        text = clean_text(read_pdf(pdf))
+        if len(text.split()) > 200:
+            texts.append(text)
     return texts
 
 
-# ================= EMBEDDINGS =================
+# ===================== NLP MODEL =====================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -81,94 +79,61 @@ def load_model():
 model = load_model()
 
 
-# ================= FLASHCARD LOGIC =================
-def generate_flashcard(texts, topic):
-    """
-    1. Read all text
-    2. Find semantically relevant chunks
-    3. Compress meaning
-    4. Generate clean conceptual flashcard
-    """
+# ===================== CORE LOGIC =====================
+def build_flashcard(texts, topic):
+    full_text = " ".join(texts)
 
-    if not texts:
-        return "⚠️ No readable content found."
+    sentences = re.split(r'(?<=[.!?])\s+', full_text)
+    sentences = [s for s in sentences if len(s.split()) > 7]
 
-    # -------- STEP 1: CHUNKING --------
-    chunks = []
-    for text in texts:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        buffer = []
+    # Semantic filtering
+    topic_vec = model.encode([topic])
+    sent_vecs = model.encode(sentences)
 
-        for s in sentences:
-            if len(s.split()) < 6:
-                continue
-            buffer.append(s)
+    scored = [
+        (s, cosine_similarity([v], topic_vec)[0][0])
+        for s, v in zip(sentences, sent_vecs)
+    ]
 
-            if len(" ".join(buffer).split()) >= 120:
-                chunks.append(" ".join(buffer))
-                buffer = []
+    relevant = [s for s, sc in sorted(scored, key=lambda x: x[1], reverse=True)[:10]]
 
-        if buffer:
-            chunks.append(" ".join(buffer))
-
-    if not chunks:
+    if not relevant:
         return "⚠️ No meaningful content found."
 
-    # -------- STEP 2: SEMANTIC MATCHING --------
-    topic_vec = model.encode([topic])
-    chunk_vecs = model.encode(chunks)
+    # Build structured sections
+    overview = relevant[0]
+    explanation = " ".join(relevant[1:4])
+    importance = " ".join(relevant[4:6])
 
-    scored = []
-    for chunk, vec in zip(chunks, chunk_vecs):
-        score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.35:   # semantic relevance threshold
-            scored.append((chunk, score))
+    return f"""
+### 📘 {topic} — Concept Flashcard
 
-    if not scored:
-        return "⚠️ Topic not found in NCERT content."
+**What is it?**  
+{overview}
 
-    scored.sort(key=lambda x: x[1], reverse=True)
-    best_chunks = [c for c, _ in scored[:3]]
-
-    # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
-    joined = " ".join(best_chunks)
-
-    # Clean remaining junk
-    joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
-    joined = re.sub(r"\s+", " ", joined)
-
-    sentences = re.split(r'(?<=[.!?])\s+', joined)
-
-    concept = " ".join(sentences[:4])
-    explanation = " ".join(sentences[4:8])
-
-    # -------- STEP 4: STRUCTURED FLASHCARD --------
-    flashcard = f"""
-### 📘 {topic} — Concept Summary
-
-**Concept Overview**  
-{concept}
-
-**Explanation**  
+**How does it work?**  
 {explanation}
 
-**Why It Matters**
-- Builds conceptual clarity  
-- Helps in analytical and application-based questions  
-- Important for NCERT & UPSC preparation  
+**Why is it important?**  
+{importance}
+
+**Exam Relevance**
+- Frequently asked in NCERT & UPSC  
+- Focus on interpretation and application  
 """
 
-    return flashcard
 
-
- 
-
-# ================= UI =================
+# ===================== APP FLOW =====================
 download_and_extract()
 
-topic = st.text_input("Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)")
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Topic (e.g. Constitution)")
 
 if st.button("Generate Flashcard"):
-    texts = load_all_text()
-    result = generate_flashcard(texts, topic)
-    st.markdown(result)
+    texts = load_subject_text(subject)
+
+    if not texts:
+        st.warning("⚠️ No readable content found.")
+    else:
+        flashcard = build_flashcard(texts, topic)
+        st.markdown(flashcard)
