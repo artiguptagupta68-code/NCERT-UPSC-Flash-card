@@ -9,32 +9,18 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ===================== CONFIG =====================
+# ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-SUBJECTS = {
-    "Polity": ["polity", "constitution"],
-    "Economics": ["economics"],
-    "Sociology": ["sociology"],
-    "Psychology": ["psychology"],
-    "Business Studies": ["business"]
-}
+# ================= STREAMLIT =================
+st.set_page_config("NCERT Flashcard Generator", layout="wide")
+st.title("📘 NCERT → Smart Concept Flashcard")
 
-DEPTH_CONFIG = {
-    "NCERT": {"top_k": 3, "similarity": 0.35},
-    "UPSC": {"top_k": 6, "similarity": 0.45}
-}
-
-# ===================== STREAMLIT SETUP =====================
-st.set_page_config("NCERT + UPSC Flashcards", layout="wide")
-st.title("📘 NCERT + UPSC Smart Flashcard Generator")
-
-# ===================== DOWNLOAD & EXTRACT =====================
+# ================= DOWNLOAD & EXTRACT =================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT ZIP...")
         gdown.download(
             f"https://drive.google.com/uc?id={FILE_ID}",
             ZIP_PATH,
@@ -43,72 +29,56 @@ def download_and_extract():
         )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
+
     with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
         zip_ref.extractall(EXTRACT_DIR)
 
-    # Extract nested ZIPs
-    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
-        target = zfile.parent / zfile.stem
-        os.makedirs(target, exist_ok=True)
-        with zipfile.ZipFile(zfile, "r") as inner:
-            inner.extractall(target)
-
-    st.success("✅ NCERT PDFs extracted successfully")
+    for z in Path(EXTRACT_DIR).rglob("*.zip"):
+        try:
+            with zipfile.ZipFile(z, "r") as inner:
+                inner.extractall(z.parent / z.stem)
+        except:
+            pass
 
 
-# ===================== CLEAN TEXT =====================
+# ================= CLEANING =================
 def clean_text(text):
-    remove_patterns = [
-        r"ISBN.*",
-        r"Printed.*",
-        r"Reprint.*",
-        r"Email:.*",
-        r"Department of.*",
-        r"University.*",
-        r"All rights reserved.*",
-        r"©.*",
-        r"^\d+\s*$",
-        r"by the Constitution.*?Act.*",
-        r"Sec\.\s*\d+.*",
-        r"\(w\.e\.f.*?\)",
-        r"Prelims\.indd.*",
+    junk = [
+        r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
+        r"All rights reserved.*", r"University.*", r"Editor.*",
+        r"Copyright.*", r"\d{1,2}\s[A-Za-z]+\s\d{4}"
     ]
-
-    for pat in remove_patterns:
-        text = re.sub(pat, " ", text, flags=re.I | re.S)
-
+    for j in junk:
+        text = re.sub(j, " ", text, flags=re.I)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
 def read_pdf(path):
-    text = ""
     try:
-        with PdfReader.open(path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    # Remove headers/footers (lines that are too short or numeric)
-                    lines = [l.strip() for l in page_text.split("\n") if len(l.strip()) > 20 and not l.strip().isdigit()]
-                    text += " ".join(lines) + " "
+        reader = PdfReader(path)
+        text = " ".join(p.extract_text() or "" for p in reader.pages)
         return clean_text(text)
-    except Exception as e:
-        print("PDF read error:", e)
+    except:
         return ""
 
-# ===================== LOAD SUBJECT TEXT =====================
-def load_subject_text(subject):
+
+# ================= LOAD ALL TEXT =================
+def load_all_text():
     texts = []
-
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        try:
-            text = read_pdf(pdf)
-            if len(text.split()) > 300:   # Only real content
-                texts.append(text)
-        except:
-            continue
-
+        txt = read_pdf(pdf)
+        if len(txt.split()) > 200:
+            texts.append(txt)
     return texts
+
+
+# ================= EMBEDDINGS =================
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+model = load_model()
 
 
 # ===================== CHUNKING & SEMANTIC FILTER =====================
