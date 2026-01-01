@@ -42,16 +42,29 @@ def download_and_extract():
 
 
 def clean_text(text):
-    junk = [
-        r"Prelims.*", r"ISBN.*", r"Printed.*", r"All rights reserved.*",
-        r"Editor.*", r"University.*", r"Department.*",
-        r"\d{4}.*", r"©.*"
+    remove_patterns = [
+        r"ISBN.*",
+        r"Printed.*",
+        r"Reprint.*",
+        r"Email:.*",
+        r"Department of.*",
+        r"University.*",
+        r"All rights reserved.*",
+        r"©.*",
+        r"^\d+\s*$",
+        r"WE, THE PEOPLE OF INDIA.*?CONSTITUTION\.",
+        r"by the Constitution.*?Act.*",
+        r"Sec\.\s*\d+.*",
+        r"\(w\.e\.f.*?\)",
+        r"Published.*",
     ]
-    for j in junk:
-        text = re.sub(j, " ", text, flags=re.I)
+
+    for pat in remove_patterns:
+        text = re.sub(pat, " ", text, flags=re.I | re.S)
 
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
 
 
 def read_pdf(path):
