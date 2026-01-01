@@ -107,20 +107,16 @@ def build_flashcard(texts, topic):
 
     return f"""
 ### 📘 {topic} — Concept Flashcard
-
-**What is it?**  
+ 
 {overview}
 
-**How does it work?**  
+  
 {explanation}
 
-**Why is it important?**  
+  
 {importance}
 
-**Exam Relevance**
-- Frequently asked in NCERT & UPSC  
-- Focus on interpretation and application  
-"""
+
 
 
 # ===================== APP FLOW =====================
