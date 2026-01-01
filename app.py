@@ -167,5 +167,5 @@ topic = st.text_input("Enter Topic (e.g. Fundamental Rights, Preamble, Constitut
 
 if st.button("Generate Flashcard"):
     texts = load_all_text()
-    result = generate_flashcard(texts, topic)
+    result = generate_single_flashcard(texts, topic)
     st.markdown(result)
