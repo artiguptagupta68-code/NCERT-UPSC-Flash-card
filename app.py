@@ -81,13 +81,16 @@ def clean_text(text):
     return text.strip()
 
 
+import pdfplumber
+
 def read_pdf(path):
+    text = ""
     try:
-        reader = PdfReader(path)
-        text = ""
-        for page in reader.pages:
-            if page.extract_text():
-                text += page.extract_text() + " "
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + " "
         return clean_text(text)
     except:
         return ""
