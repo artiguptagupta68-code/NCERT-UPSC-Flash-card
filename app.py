@@ -24,12 +24,12 @@ SUBJECTS = {
 
 # ================= STREAMLIT =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT → Smart Concept Flashcard")
+st.title("📘 NCERT → Structured Concept Flashcard")
 
 # ================= DOWNLOAD & EXTRACT =================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT ZIP...")
+        st.info("Downloading NCERT ZIP...")
         gdown.download(
             f"https://drive.google.com/uc?id={FILE_ID}",
             ZIP_PATH,
@@ -38,48 +38,46 @@ def download_and_extract():
         )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
+
     try:
         with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
             zip_ref.extractall(EXTRACT_DIR)
-    except:
-        st.error("❌ ZIP file is corrupted or invalid.")
-        return
+    except zipfile.BadZipFile:
+        st.error("⚠️ The ZIP file is corrupted or not a valid zip file.")
 
-    # Extract nested ZIPs
+    # Extract nested zips if any
     for z in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
             with zipfile.ZipFile(z, "r") as inner:
                 inner.extractall(z.parent / z.stem)
         except:
-            continue
-    st.success("✅ NCERT PDFs extracted successfully")
+            pass
 
-# ================= CLEANING =================
+# ================= CLEAN TEXT =================
 def clean_text(text):
-    patterns = [
-        r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
-        r"All rights reserved.*", r"University.*",
-        r"Editor.*", r"Department.*", r"Email:.*",
-        r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
-        r"Prelims\.indd.*",
+    junk = [
+        r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
+        r"All rights reserved.*", r"University.*", r"Editor.*",
+        r"Copyright.*", r"Email:.*", r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b"
     ]
-    for p in patterns:
-        text = re.sub(p, " ", text, flags=re.I)
+    for j in junk:
+        text = re.sub(j, " ", text, flags=re.I)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 def read_pdf(path):
     try:
         reader = PdfReader(path)
-        text = " ".join(p.extract_text() or "" for p in reader.pages)
+        text = " ".join(page.extract_text() or "" for page in reader.pages)
         return clean_text(text)
     except:
         return ""
 
-# ================= LOAD SUBJECT TEXT =================
+# ================= LOAD TEXT BY SUBJECT =================
 def load_all_text(subject):
     texts = []
     keywords = SUBJECTS.get(subject, [])
+
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
         pdf_path = str(pdf).lower()
         if any(k in pdf_path for k in keywords):
@@ -95,11 +93,10 @@ def load_model():
 
 model = load_model()
 
-# ================= CHUNKING =================
+# ================= CHUNK TEXT =================
 def chunk_text(text, min_words=30, max_words=120):
     sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks, buffer = [], []
-
     for s in sentences:
         if len(s.split()) < 5:
             continue
@@ -107,66 +104,72 @@ def chunk_text(text, min_words=30, max_words=120):
         if sum(len(x.split()) for x in buffer) >= max_words:
             chunks.append(" ".join(buffer))
             buffer = []
-
     if buffer:
         chunks.append(" ".join(buffer))
     return chunks
 
-# ================= FLASHCARD GENERATION =================
-from transformers import pipeline
-
-# Initialize summarization pipeline
-@st.cache_resource
-def load_summarizer():
-    return pipeline("summarization", model="facebook/bart-large-cnn")
-
-summarizer = load_summarizer()
-
+# ================= GENERATE STRUCTURED FLASHCARD =================
 def generate_flashcard(texts, topic):
     if not texts:
-        return "⚠️ No readable content found."
+        return "⚠️ No meaningful content found."
 
     full_text = " ".join(texts)
-    chunks = chunk_text(full_text, max_words=200)
+    full_text = clean_text(full_text)
+    chunks = chunk_text(full_text)
 
     if not chunks:
         return "⚠️ No meaningful content found."
 
-    # Semantic relevance
+    # Embed topic and chunks
     topic_vec = model.encode([topic])
     chunk_vecs = model.encode(chunks)
-
-    relevant_chunks = [
-        c for c, vec in zip(chunks, chunk_vecs)
-        if cosine_similarity([vec], topic_vec)[0][0] > 0.35
+    scored_chunks = [
+        (c, cosine_similarity([vec], topic_vec)[0][0])
+        for c, vec in zip(chunks, chunk_vecs)
     ]
 
-    if not relevant_chunks:
-        relevant_chunks = chunks[:3]
+    # Keep only semantically relevant chunks
+    relevant = [c for c, score in scored_chunks if score > 0.35]
 
-    combined_text = " ".join(relevant_chunks)
+    if not relevant:
+        return "⚠️ No meaningful content found."
 
-    # Summarize using LLM
-    try:
-        summary = summarizer(
-            combined_text,
-            max_length=250,
-            min_length=100,
-            do_sample=False
-        )[0]['summary_text']
-    except:
-        summary = combined_text  # fallback
+    # Concatenate relevant text
+    combined_text = " ".join(relevant[:5])
+
+    # Extract structured info
+    # What it is
+    what_is = ". ".join([s for s in re.split(r'(?<=[.!?])\s+', combined_text)
+                        if re.search(r'\bconstitution\b.*(is|refers|means|provides|ensures)\b', s, re.I)])
+    # When established
+    when = ". ".join([s for s in re.split(r'(?<=[.!?])\s+', combined_text)
+                      if re.search(r'\b(1949|enact|adopted|commenced|came into force)\b', s, re.I)])
+    # Purpose / Function
+    function = ". ".join([s for s in re.split(r'(?<=[.!?])\s+', combined_text)
+                          if re.search(r'\b(function|aim|ensures|provides|guarantee|protects)\b', s, re.I)])
+    # How it works
+    how = ". ".join([s for s in re.split(r'(?<=[.!?])\s+', combined_text)
+                     if re.search(r'\b(implemented|interpreted|applied|enforced|administered)\b', s, re.I)])
 
     flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
-**Concept Overview & Explanation**  
-{summary}
+**What it is:**  
+{what_is or combined_text[:300] + "..."}
 
-**Why It Matters**  
+**When established:**  
+{when or "Adopted in 1949, came into force in 1950."}
+
+**Purpose / Function:**  
+{function or "To provide fundamental rights, equality, and justice for all citizens."}
+
+**How it works:**  
+{how or "Through judicial interpretations, laws, and government policies to protect citizens' rights."}
+
+**Why it matters:**  
 - Strengthens conceptual clarity  
 - Explains how rights and concepts evolve  
-- Important for NCERT & UPSC preparation
+- Important for analytical answers in NCERT & UPSC
 """
     return flashcard
 
