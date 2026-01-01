@@ -29,6 +29,7 @@ st.title("📘 NCERT → Smart Concept Flashcard")
 # ================= DOWNLOAD & EXTRACT =================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
+        st.info("📥 Downloading NCERT ZIP...")
         gdown.download(
             f"https://drive.google.com/uc?id={FILE_ID}",
             ZIP_PATH,
@@ -37,34 +38,35 @@ def download_and_extract():
         )
 
     os.makedirs(EXTRACT_DIR, exist_ok=True)
+    try:
+        with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
+            zip_ref.extractall(EXTRACT_DIR)
+    except:
+        st.error("❌ ZIP file is corrupted or invalid.")
+        return
 
-    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
-        zip_ref.extractall(EXTRACT_DIR)
-
+    # Extract nested ZIPs
     for z in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
             with zipfile.ZipFile(z, "r") as inner:
                 inner.extractall(z.parent / z.stem)
         except:
-            pass
+            continue
+    st.success("✅ NCERT PDFs extracted successfully")
 
-
-# ================= CLEAN TEXT =================
+# ================= CLEANING =================
 def clean_text(text):
     patterns = [
         r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
         r"All rights reserved.*", r"University.*",
         r"Editor.*", r"Department.*", r"Email:.*",
         r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
-        r"Prelims\.indd.*"
+        r"Prelims\.indd.*",
     ]
-
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
-
     text = re.sub(r"\s+", " ", text)
     return text.strip()
-
 
 def read_pdf(path):
     try:
@@ -74,20 +76,17 @@ def read_pdf(path):
     except:
         return ""
 
-
-# ================= LOAD ALL TEXT =================
+# ================= LOAD SUBJECT TEXT =================
 def load_all_text(subject):
     texts = []
     keywords = SUBJECTS.get(subject, [])
-
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in str(pdf).lower() for k in keywords):
-            content = read_pdf(pdf)
-            if len(content.split()) > 50:
-                texts.append(content)
-
+        pdf_path = str(pdf).lower()
+        if any(k in pdf_path for k in keywords):
+            text = read_pdf(pdf)
+            if len(text.split()) > 50:
+                texts.append(text)
     return texts
-
 
 # ================= EMBEDDING MODEL =================
 @st.cache_resource
@@ -96,75 +95,79 @@ def load_model():
 
 model = load_model()
 
-
-# ================= FLASHCARD GENERATOR =================
-def generate_flashcard(texts, topic):
-    combined = " ".join(texts)
-    combined = clean_text(combined)
-
-    if len(combined.split()) < 80:
-        return "⚠️ No meaningful content found."
-
-    # Split into sentences
-    sentences = re.split(r'(?<=[.!?])\s+', combined)
-
-    # Create chunks
+# ================= CHUNKING =================
+def chunk_text(text, min_words=30, max_words=120):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks, buffer = [], []
+
     for s in sentences:
-        if len(s.split()) < 6:
+        if len(s.split()) < 5:
             continue
         buffer.append(s)
-        if sum(len(x.split()) for x in buffer) >= 120:
+        if sum(len(x.split()) for x in buffer) >= max_words:
             chunks.append(" ".join(buffer))
             buffer = []
 
     if buffer:
         chunks.append(" ".join(buffer))
+    return chunks
 
-    # Semantic similarity
+# ================= FLASHCARD GENERATION =================
+def generate_flashcard(texts, topic):
+    if not texts:
+        return "⚠️ No readable content found."
+
+    full_text = " ".join(texts)
+    chunks = chunk_text(full_text)
+
+    if not chunks:
+        return "⚠️ No meaningful content found."
+
+    # Semantic relevance
     topic_vec = model.encode([topic])
     chunk_vecs = model.encode(chunks)
 
-    scored = [
-        (chunk, cosine_similarity([vec], topic_vec)[0][0])
-        for chunk, vec in zip(chunks, chunk_vecs)
+    relevant_chunks = [
+        c for c, vec in zip(chunks, chunk_vecs)
+        if cosine_similarity([vec], topic_vec)[0][0] > 0.35
     ]
 
-    scored.sort(key=lambda x: x[1], reverse=True)
+    if not relevant_chunks:
+        relevant_chunks = chunks[:3]  # fallback
 
-    # Fallback logic
-    if not scored:
-        return "⚠️ No meaningful content found."
+    # Combine and summarize sections
+    combined_text = " ".join(relevant_chunks[:3])
 
-    if scored[0][1] < 0.25:
-        selected = scored[0][0]
-    else:
-        selected = " ".join([c for c, _ in scored[:2]])
+    # Simple sectioning logic
+    sentences = re.split(r'(?<=[.!?])\s+', combined_text)
+    overview = " ".join(sentences[:5])
+    explanation = " ".join(sentences[5:10]) if len(sentences) > 5 else ""
+    importance = " ".join(sentences[10:15]) if len(sentences) > 10 else ""
 
-    return f"""
+    flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
-{selected}
+{overview}
 
-**Why It Matters**
-- Builds conceptual clarity  
-- Helps in analytical & application-based questions  
-- Frequently tested in NCERT & UPSC  
+**Explanation / How it Works**  
+{explanation}
+
+**Why It Matters**  
+{importance or 'Helps understand the topic clearly and its relevance in real life.'}
+- Important for NCERT & UPSC exams
+- Strengthens conceptual clarity
 """
-
+    return flashcard
 
 # ================= STREAMLIT UI =================
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
 topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
 if st.button("Generate Flashcard") and topic.strip():
     texts = load_all_text(subject)
-
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        flashcard = generate_flashcard(texts, topic)
-        st.markdown(flashcard)
+    flashcard = generate_flashcard(texts, topic)
+    st.markdown(flashcard)
