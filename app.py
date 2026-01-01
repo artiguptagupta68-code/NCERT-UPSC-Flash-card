@@ -163,7 +163,7 @@ depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
 topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
 if st.button("Generate Flashcard") and topic.strip():
-    texts = load_subject_text(subject)
+    texts = load_all_text(subject)
     if not texts:
         st.warning("⚠️ No readable content found for this subject.")
     else:
