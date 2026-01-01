@@ -25,73 +25,52 @@ SUBJECTS = {
     "Business Studies": ["business"]
 }
 
-DEPTH_CONFIG = {
-    "NCERT": {"top_k": 3, "similarity": 0.35},
-    "UPSC": {"top_k": 6, "similarity": 0.45}
-}
-
 # =====================================================
 # STREAMLIT SETUP
 # =====================================================
 st.set_page_config("NCERT + UPSC Flashcards", layout="wide")
 st.title("📘 NCERT + UPSC Smart Flashcard Generator")
 
+
 # =====================================================
 # DOWNLOAD & EXTRACT
 # =====================================================
-# ===================== RUN APP =====================
-
-download_and_extract()
-
-subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
-topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
-
-if topic:
-    texts = load_subject_text(subject)
-
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        result = generate_single_flashcard(
-            texts=texts,
-            topic=topic,
-            depth=depth
+def download_and_extract():
+    if not os.path.exists(ZIP_PATH):
+        st.info("📥 Downloading NCERT ZIP...")
+        gdown.download(
+            f"https://drive.google.com/uc?id={FILE_ID}",
+            ZIP_PATH,
+            quiet=False,
+            fuzzy=True
         )
 
-        st.markdown(result)
+    os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    # extract nested zips
-    for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
+    with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
+        zip_ref.extractall(EXTRACT_DIR)
+
+    # Extract nested zips
+    for z in Path(EXTRACT_DIR).rglob("*.zip"):
         try:
-            target = zfile.parent / zfile.stem
+            target = z.parent / z.stem
             target.mkdir(exist_ok=True)
-            with zipfile.ZipFile(zfile, "r") as inner:
+            with zipfile.ZipFile(z, "r") as inner:
                 inner.extractall(target)
         except:
             pass
 
-    st.success("✅ NCERT PDFs extracted")
-
 
 # =====================================================
-# TEXT CLEANING
+# CLEANING FUNCTIONS
 # =====================================================
 def clean_text(text):
     junk_patterns = [
-        r"Prelims\.indd.*",
-        r"ISBN.*",
-        r"All rights reserved.*",
-        r"Published.*",
-        r"Printed.*",
-        r"Reprint.*",
-        r"Editor.*",
-        r"University.*",
-        r"Department.*",
-        r"Copyright.*",
-        r"\d{1,2}\s[A-Za-z]+\s\d{4}",
+        r"Prelims\.indd.*", r"ISBN.*", r"Printed.*",
+        r"All rights reserved.*", r"University.*",
+        r"Editor.*", r"Professor.*", r"©.*",
+        r"\d{1,2}\s[A-Za-z]+\s\d{4}"
     ]
-
     for pat in junk_patterns:
         text = re.sub(pat, " ", text, flags=re.I)
 
@@ -112,40 +91,15 @@ def read_pdf(path):
 
 
 # =====================================================
-# LOAD TEXT BY SUBJECT
+# LOAD TEXT
 # =====================================================
 def load_subject_text(subject):
     texts = []
-
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        try:
-            text = read_pdf(pdf)
-            if len(text.split()) > 300:   # real content check
-                texts.append(text)
-        except:
-            continue
-
+        text = read_pdf(pdf)
+        if len(text.split()) > 300:
+            texts.append(text)
     return texts
-
-# =====================================================
-# CHUNKING
-# =====================================================
-def chunk_text(text, min_words=80, max_words=200):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    chunks, current = [], []
-
-    for s in sentences:
-        if len(s.split()) < 5:  # ignore tiny sentences
-            continue
-        current.append(s)
-        total_words = sum(len(x.split()) for x in current)
-        if total_words >= max_words:
-            chunks.append(" ".join(current))
-            current = []
-    if current:
-        chunks.append(" ".join(current))
-    return chunks
-
 
 
 # =====================================================
@@ -159,37 +113,12 @@ model = load_model()
 
 
 # =====================================================
-# REMOVE DUPLICATES
-# =====================================================
-def deduplicate(chunks, threshold=0.85):
-    if len(chunks) <= 1:
-        return chunks
-
-    embeds = model.encode(chunks)
-    final = []
-
-    for i, emb in enumerate(embeds):
-        keep = True
-        for kept in final:
-            sim = cosine_similarity([emb], [kept[1]])[0][0]
-            if sim > threshold:
-                keep = False
-                break
-        if keep:
-            final.append((chunks[i], emb))
-
-    return [x[0] for x in final]
-
-
-# =====================================================
 # FLASHCARD GENERATION
 # =====================================================
-def generate_single_flashcard(texts, topic, depth="NCERT"):
+def generate_single_flashcard(texts, topic, depth):
     cleaned = []
     for t in texts:
-        t = re.sub(r"(Prelims\.indd.*|ISBN.*|Printed.*|©.*|All rights reserved.*|University.*|Editor.*|Professor.*)", " ", t, flags=re.I)
-        t = re.sub(r"\s+", " ", t)
-        if len(t.split()) > 80:
+        if len(t.split()) > 100:
             cleaned.append(t)
 
     if not cleaned:
@@ -198,8 +127,8 @@ def generate_single_flashcard(texts, topic, depth="NCERT"):
     full_text = " ".join(cleaned)
 
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
-    chunks, buf = [], []
 
+    chunks, buf = [], []
     for s in sentences:
         if len(s.split()) < 6:
             continue
@@ -215,35 +144,32 @@ def generate_single_flashcard(texts, topic, depth="NCERT"):
     chunk_vecs = model.encode(chunks)
 
     threshold = 0.35 if depth == "NCERT" else 0.45
-
-    filtered = [
+    selected = [
         c for c, v in zip(chunks, chunk_vecs)
         if cosine_similarity([v], topic_vec)[0][0] > threshold
     ]
 
-    if not filtered:
+    if not selected:
         return "⚠️ No readable content found for this subject."
 
-    summary_text = " ".join(filtered[:2])
-    summary_sentences = re.split(r'(?<=[.!?])\s+', summary_text)
+    summary = " ".join(selected[:2])
+    sentences = re.split(r'(?<=[.!?])\s+', summary)
 
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
-{' '.join(summary_sentences[:6])}
+{' '.join(sentences[:6])}
 
 **Why It Matters**
 - Builds conceptual clarity  
-- Helps in real-world application  
-- High-weight topic for NCERT & UPSC  
+- Helps connect theory with real life  
+- Frequently asked in UPSC & NCERT  
 """
 
 
-
-
 # =====================================================
-# UI
+# UI EXECUTION
 # =====================================================
 download_and_extract()
 
@@ -253,11 +179,5 @@ topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
 
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
-
-result = generate_single_flashcard(
-    texts = load_subject_text(subject),
-    topic=topic,
-    depth=depth
-)
-
-st.markdown(result)
+    result = generate_single_flashcard(texts, topic, depth)
+    st.markdown(result)
