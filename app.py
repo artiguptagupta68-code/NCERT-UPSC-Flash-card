@@ -82,6 +82,7 @@ def clean_text(text):
 
 
 import pdfplumber
+import re
 
 def read_pdf(path):
     text = ""
@@ -90,11 +91,13 @@ def read_pdf(path):
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
-                    text += page_text + " "
+                    # Remove headers/footers (lines that are too short or numeric)
+                    lines = [l.strip() for l in page_text.split("\n") if len(l.strip()) > 20 and not l.strip().isdigit()]
+                    text += " ".join(lines) + " "
         return clean_text(text)
-    except:
+    except Exception as e:
+        print("PDF read error:", e)
         return ""
-
 
 # ===================== LOAD SUBJECT TEXT =====================
 def load_subject_text(subject):
