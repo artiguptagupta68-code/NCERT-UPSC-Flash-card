@@ -159,7 +159,7 @@ def generate_flashcard(texts, topic):
 """
 
     return flashcard
-
+ 
 
 # ================= UI =================
 download_and_extract()
