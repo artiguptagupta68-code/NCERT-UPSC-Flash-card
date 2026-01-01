@@ -39,20 +39,27 @@ st.title("📘 NCERT + UPSC Smart Flashcard Generator")
 # =====================================================
 # DOWNLOAD & EXTRACT
 # =====================================================
-def download_and_extract():
-    if not os.path.exists(ZIP_PATH):
-        st.info("📥 Downloading NCERT ZIP...")
-        gdown.download(
-            f"https://drive.google.com/uc?id={FILE_ID}",
-            ZIP_PATH,
-            quiet=False,
-            fuzzy=True
+# ===================== RUN APP =====================
+
+download_and_extract()
+
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+depth = st.radio("Select Depth", ["NCERT", "UPSC"], horizontal=True)
+topic = st.text_input("Enter Topic (e.g. Fundamental Rights)")
+
+if topic:
+    texts = load_subject_text(subject)
+
+    if not texts:
+        st.warning("⚠️ No readable content found for this subject.")
+    else:
+        result = generate_single_flashcard(
+            texts=texts,
+            topic=topic,
+            depth=depth
         )
 
-    os.makedirs(EXTRACT_DIR, exist_ok=True)
-
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        z.extractall(EXTRACT_DIR)
+        st.markdown(result)
 
     # extract nested zips
     for zfile in Path(EXTRACT_DIR).rglob("*.zip"):
@@ -178,11 +185,6 @@ def deduplicate(chunks, threshold=0.85):
 # FLASHCARD GENERATION
 # =====================================================
 def generate_single_flashcard(texts, topic, depth="NCERT"):
-    """
-    Generates ONE clean summarized flashcard for a topic
-    """
-
-    # Step 1: Clean text
     cleaned = []
     for t in texts:
         t = re.sub(r"(Prelims\.indd.*|ISBN.*|Printed.*|©.*|All rights reserved.*|University.*|Editor.*|Professor.*)", " ", t, flags=re.I)
@@ -195,53 +197,48 @@ def generate_single_flashcard(texts, topic, depth="NCERT"):
 
     full_text = " ".join(cleaned)
 
-    # Step 2: Chunking (large conceptual chunks)
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
-    chunks, temp = [], []
+    chunks, buf = [], []
 
     for s in sentences:
         if len(s.split()) < 6:
             continue
-        temp.append(s)
-        if sum(len(x.split()) for x in temp) >= 200:
-            chunks.append(" ".join(temp))
-            temp = []
+        buf.append(s)
+        if sum(len(x.split()) for x in buf) >= 180:
+            chunks.append(" ".join(buf))
+            buf = []
 
-    if temp:
-        chunks.append(" ".join(temp))
+    if buf:
+        chunks.append(" ".join(buf))
 
-    # Step 3: Semantic filtering
-    topic_emb = model.encode([topic])
-    chunk_emb = model.encode(chunks)
+    topic_vec = model.encode([topic])
+    chunk_vecs = model.encode(chunks)
 
     threshold = 0.35 if depth == "NCERT" else 0.45
-    relevant = [
-        c for c, e in zip(chunks, chunk_emb)
-        if cosine_similarity([e], topic_emb)[0][0] >= threshold
+
+    filtered = [
+        c for c, v in zip(chunks, chunk_vecs)
+        if cosine_similarity([v], topic_vec)[0][0] > threshold
     ]
 
-    if not relevant:
+    if not filtered:
         return "⚠️ No readable content found for this subject."
 
-    # Step 4: Summarization (single flashcard)
-    combined = " ".join(relevant[:3])
+    summary_text = " ".join(filtered[:2])
+    summary_sentences = re.split(r'(?<=[.!?])\s+', summary_text)
 
-    sentences = re.split(r'(?<=[.!?])\s+', combined)
-    core = " ".join(sentences[:6])
-
-    flashcard = f"""
+    return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**  
-{core}
+{' '.join(summary_sentences[:6])}
 
 **Why It Matters**
 - Builds conceptual clarity  
-- Links theory with real-life understanding  
-- Important for NCERT & UPSC exams  
+- Helps in real-world application  
+- High-weight topic for NCERT & UPSC  
 """
 
-    return flashcard
 
 
 
