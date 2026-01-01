@@ -72,12 +72,18 @@ def read_pdf(path):
 
 
 # ================= LOAD ALL TEXT =================
-def load_all_text():
+def load_all_text(subject):
     texts = []
+    keywords = SUBJECTS.get(subject, [])
+
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        txt = read_pdf(pdf)
-        if len(txt.split()) > 200:
-            texts.append(txt)
+        pdf_path = str(pdf).lower()
+
+        if any(k in pdf_path for k in keywords):
+            text = read_pdf(pdf)
+            if len(text.split()) > 50:
+                texts.append(text)
+
     return texts
 
 
