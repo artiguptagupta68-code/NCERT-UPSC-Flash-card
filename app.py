@@ -113,12 +113,21 @@ def chunk_text(text, min_words=30, max_words=120):
     return chunks
 
 # ================= FLASHCARD GENERATION =================
+from transformers import pipeline
+
+# Initialize summarization pipeline
+@st.cache_resource
+def load_summarizer():
+    return pipeline("summarization", model="facebook/bart-large-cnn")
+
+summarizer = load_summarizer()
+
 def generate_flashcard(texts, topic):
     if not texts:
         return "⚠️ No readable content found."
 
     full_text = " ".join(texts)
-    chunks = chunk_text(full_text)
+    chunks = chunk_text(full_text, max_words=200)
 
     if not chunks:
         return "⚠️ No meaningful content found."
@@ -133,30 +142,31 @@ def generate_flashcard(texts, topic):
     ]
 
     if not relevant_chunks:
-        relevant_chunks = chunks[:3]  # fallback
+        relevant_chunks = chunks[:3]
 
-    # Combine and summarize sections
-    combined_text = " ".join(relevant_chunks[:3])
+    combined_text = " ".join(relevant_chunks)
 
-    # Simple sectioning logic
-    sentences = re.split(r'(?<=[.!?])\s+', combined_text)
-    overview = " ".join(sentences[:5])
-    explanation = " ".join(sentences[5:10]) if len(sentences) > 5 else ""
-    importance = " ".join(sentences[10:15]) if len(sentences) > 10 else ""
+    # Summarize using LLM
+    try:
+        summary = summarizer(
+            combined_text,
+            max_length=250,
+            min_length=100,
+            do_sample=False
+        )[0]['summary_text']
+    except:
+        summary = combined_text  # fallback
 
     flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
-**Concept Overview**  
-{overview}
-
-**Explanation / How it Works**  
-{explanation}
+**Concept Overview & Explanation**  
+{summary}
 
 **Why It Matters**  
-{importance or 'Helps understand the topic clearly and its relevance in real life.'}
-- Important for NCERT & UPSC exams
-- Strengthens conceptual clarity
+- Strengthens conceptual clarity  
+- Explains how rights and concepts evolve  
+- Important for NCERT & UPSC preparation
 """
     return flashcard
 
