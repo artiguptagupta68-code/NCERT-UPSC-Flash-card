@@ -14,6 +14,14 @@ FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
+SUBJECTS = {
+    "Polity": ["polity", "constitution"],
+    "Economics": ["economics"],
+    "Sociology": ["sociology"],
+    "Psychology": ["psychology"],
+    "Business Studies": ["business"]
+}
+
 # ================= STREAMLIT =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
 st.title("📘 NCERT → Smart Concept Flashcard")
