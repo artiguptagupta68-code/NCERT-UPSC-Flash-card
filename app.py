@@ -215,5 +215,5 @@ if st.button("Generate Flashcard") and topic.strip():
     if not texts:
         st.warning("⚠️ No readable content found for this subject.")
     else:
-        flashcard = build_flashcard(texts, topic)
+        flashcard =generate_flashcard(texts, topic)
         st.markdown(flashcard)
