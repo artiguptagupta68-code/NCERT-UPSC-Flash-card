@@ -115,45 +115,67 @@ def is_why_sentence(s):
 
 # ================= FLASHCARD ENGINE =================
 def generate_flashcard(texts, topic):
+    topic_lower = topic.lower()
+
+    # ---- Step 1: Clean + chunk text ----
     full_text = clean_pdf_text(" ".join(texts))
-    sentences = split_sentences(full_text)
+    paragraphs = re.split(r'\n{1,}|\.\s{2,}', full_text)
 
+    # Keep only meaningful chunks
+    paragraphs = [
+        p.strip() for p in paragraphs
+        if len(p.split()) > 40
+    ]
+
+    # ---- Step 2: Filter by topic presence ----
+    topic_chunks = [
+        p for p in paragraphs
+        if topic_lower in p.lower()
+    ]
+
+    if not topic_chunks:
+        return "⚠️ Topic not found clearly in NCERT content."
+
+    # ---- Step 3: Semantic ranking inside topic-only chunks ----
     topic_vec = model.encode(topic, convert_to_tensor=True)
-    sent_vecs = model.encode(sentences, convert_to_tensor=True)
-    scores = util.cos_sim(topic_vec, sent_vecs)[0]
+    para_vecs = model.encode(topic_chunks, convert_to_tensor=True)
 
-    ranked = sorted(zip(sentences, scores.tolist()), key=lambda x: x[1], reverse=True)
-    top = [s for s, _ in ranked[:40]]
+    scores = util.cos_sim(topic_vec, para_vecs)[0]
+    ranked = [p for p, _ in sorted(zip(topic_chunks, scores), key=lambda x: x[1], reverse=True)]
 
-    what, how, why = [], [], []
+    # ---- Step 4: Extract meaning sections ----
+    what, how, why = None, None, None
 
-    for s in top:
-        if not what and is_definition_sentence(s):
-            what.append(s)
-        elif not how and is_how_sentence(s):
-            how.append(s)
-        elif not why and is_why_sentence(s):
-            why.append(s)
+    for p in ranked:
+        p_low = p.lower()
 
-    if not what and top:
-        what.append(top[0])
-    if not how and len(top) > 1:
-        how.append(top[1])
-    if not why and len(top) > 2:
-        why.append(top[2])
+        if not what and any(x in p_low for x in ["is", "means", "refers to", "can be understood"]):
+            what = p
+
+        if not how and any(x in p_low for x in ["works", "functions", "operates", "ensures", "provides"]):
+            how = p
+
+        if not why and any(x in p_low for x in ["important", "significant", "because", "role", "helps"]):
+            why = p
+
+    # Fallbacks
+    if not what: what = ranked[0]
+    if not how: how = ranked[1] if len(ranked) > 1 else ranked[0]
+    if not why: why = ranked[2] if len(ranked) > 2 else ranked[0]
 
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
 
 **What is it?**  
-{what[0]}
+{what}
 
 **How does it work?**  
-{how[0]}
+{how}
 
 **Why is it important?**  
-{why[0]}
+{why}
 """
+
 
 
 # ================= STREAMLIT UI =================
