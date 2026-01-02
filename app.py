@@ -81,94 +81,91 @@ def load_model():
 model = load_model()
 
 
-# ================= FLASHCARD LOGIC =================
+# ================= CLEANING & FILTERING =================
+
+def clean_pdf_text(text):
+    # Remove noise and page junk
+    patterns = [
+        r"LET'S DO IT.*",
+        r"LET'S DEBATE.*",
+        r"Reprint.*",
+        r"Page \d+",
+        r"\b\d+\b",
+        r"©.*",
+        r"Printed.*",
+        r"Activity.*",
+        r"Exercise.*"
+    ]
+    for p in patterns:
+        text = re.sub(p, " ", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def split_sentences(text):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return [s.strip() for s in sentences if len(s.split()) > 8]
+
+
+# ================= SEMANTIC FILTER =================
+
+def is_definition_sentence(s):
+    return any(k in s.lower() for k in [
+        "is", "means", "refers to", "can be understood", "defined as"
+    ])
+
+def is_how_sentence(s):
+    return any(k in s.lower() for k in [
+        "works", "functions", "operates", "ensures", "allows", "enables"
+    ])
+
+def is_why_sentence(s):
+    return any(k in s.lower() for k in [
+        "important", "significant", "because", "so that", "helps", "ensures"
+    ])
+
+
+# ================= CORE FLASHCARD ENGINE =================
+
 def generate_flashcard(texts, topic):
-    """
-    1. Read all text
-    2. Find semantically relevant chunks
-    3. Compress meaning
-    4. Generate clean conceptual flashcard
-    """
+    full_text = clean_pdf_text(" ".join(texts))
+    sentences = split_sentences(full_text)
 
-    if not texts:
-        return "⚠️ No readable content found."
+    # semantic ranking
+    topic_vec = model.encode(topic, convert_to_tensor=True)
+    sent_vecs = model.encode(sentences, convert_to_tensor=True)
+    scores = util.cos_sim(topic_vec, sent_vecs)[0]
 
-    # -------- STEP 1: CHUNKING --------
-    chunks = []
-    for text in texts:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        buffer = []
+    ranked = sorted(zip(sentences, scores.tolist()), key=lambda x: x[1], reverse=True)
+    top_sentences = [s for s, _ in ranked[:40]]
 
-        for s in sentences:
-            if len(s.split()) < 6:
-                continue
-            buffer.append(s)
+    what, how, why = [], [], []
 
-            if len(" ".join(buffer).split()) >= 120:
-                chunks.append(" ".join(buffer))
-                buffer = []
+    for s in top_sentences:
+        if is_definition_sentence(s) and not what:
+            what.append(s)
+        elif is_how_sentence(s) and not how:
+            how.append(s)
+        elif is_why_sentence(s) and not why:
+            why.append(s)
 
-        if buffer:
-            chunks.append(" ".join(buffer))
+    # Fallbacks if something is missing
+    if not what and top_sentences:
+        what.append(top_sentences[0])
+    if not how and len(top_sentences) > 1:
+        how.append(top_sentences[1])
+    if not why and len(top_sentences) > 2:
+        why.append(top_sentences[2])
 
-    if not chunks:
-        return "⚠️ No meaningful content found."
+    return f"""
+### 📘 {topic.title()} — Concept Flashcard
 
-    # -------- STEP 2: SEMANTIC MATCHING --------
-    topic_vec = model.encode([topic])
-    chunk_vecs = model.encode(chunks)
+**What is it?**  
+{what[0]}
 
-    scored = []
-    for chunk, vec in zip(chunks, chunk_vecs):
-        score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.75:   # semantic relevance threshold
-            scored.append((chunk, score))
+**How does it work?**  
+{how[0]}
 
-    if not scored:
-        return "⚠️ Topic not found in NCERT content."
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    best_chunks = [c for c, _ in scored[:3]]
-
-    # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
-    joined = " ".join(best_chunks)
-
-    # Clean remaining junk
-    joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
-    joined = re.sub(r"\s+", " ", joined)
-
-    sentences = re.split(r'(?<=[.!?])\s+', joined)
-
-    concept = " ".join(sentences[:4])
-    explanation = " ".join(sentences[4:8])
-
-    # -------- STEP 4: STRUCTURED FLASHCARD --------
-    flashcard = f"""
-### 📘 {topic} — Concept Summary
-
-**Concept Overview**
-{concept}
-
-**Explanation**
-{explanation}
-
-**Why It Matters**
-- Builds conceptual clarity
-- Helps in analytical and application-based questions
-- Important for NCERT & UPSC preparation
+**Why is it important?**  
+{why[0]}
 """
-
-    return flashcard
-
-
-
-
-# ================= UI =================
-download_and_extract()
-
-topic = st.text_input("Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)")
-
-if st.button("Generate Flashcard"):
-    texts = load_all_text()
-    result = generate_flashcard(texts, topic)
-    st.markdown(result)
