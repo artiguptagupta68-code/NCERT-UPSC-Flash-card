@@ -121,37 +121,40 @@ def is_meaningful_sentence(sentence, topic):
 
     return True
 
-CONCEPT_TEMPLATES = {
-    "constitution": {
-        "what": "The Constitution of India is the supreme law of the country that defines the framework of governance, distribution of powers, and fundamental rights of citizens.",
-        "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
-        "how": "It establishes the structure of government, distributes powers between Union and States, and provides mechanisms such as judicial review and amendment procedures.",
-        "why": "It ensures rule of law, protects fundamental rights, and maintains democratic governance.",
-        "articles": "Articles 1–395; Part III (Fundamental Rights), Part IV (DPSP), Article 368 (Amendment)."
-    },
-
-    "election commission of india": {
-        "what": "The Election Commission of India is an independent constitutional body responsible for conducting free and fair elections.",
-        "when": "It was established on 25 January 1950 under Article 324 of the Constitution.",
-        "how": "It supervises elections, prepares electoral rolls, enforces the Model Code of Conduct, and regulates political parties.",
-        "why": "It ensures democratic legitimacy and prevents electoral malpractice.",
-        "articles": "Article 324 of the Constitution."
-    }
-}
-
-
-
-# ================= FLASHCARD LOGIC =================
 def generate_clean_flashcard(texts, topic):
     topic_key = topic.lower().strip()
 
-    # 1️⃣ Load base template
-    base = CONCEPT_TEMPLATES.get(topic_key, None)
+    # ---------------- TEMPLATE DATABASE ----------------
+    CONCEPT_TEMPLATES = {
+        "constitution of india": {
+            "what": "The Constitution of India is the supreme law of the country that defines the framework of governance, distribution of powers, and fundamental rights of citizens.",
+            "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
+            "how": "It establishes the structure of government, distributes powers between Union and States, and provides mechanisms such as judicial review and constitutional amendments.",
+            "why": "It ensures rule of law, protects fundamental rights, and maintains democratic governance.",
+            "articles": "Articles 1–395; Part III (Fundamental Rights), Part IV (DPSP), Article 368."
+        },
+        "election commission of india": {
+            "what": "The Election Commission of India is an independent constitutional authority responsible for conducting free and fair elections.",
+            "when": "It was established on 25 January 1950 under Article 324 of the Constitution.",
+            "how": "It supervises elections, prepares electoral rolls, and enforces the Model Code of Conduct.",
+            "why": "It ensures free, fair, and transparent elections in a democratic system.",
+            "articles": "Article 324 of the Constitution."
+        }
+    }
 
+    base = CONCEPT_TEMPLATES.get(topic_key)
+
+    # ---------------- FALLBACK LOGIC ----------------
     if not base:
-        return "⚠️ Topic not found in knowledge base. Please add a template."
+        base = {
+            "what": f"{topic.title()} is an important concept in the Indian political and constitutional system.",
+            "when": "It evolved through constitutional, legal, or institutional developments over time.",
+            "how": f"It functions through legal provisions, institutional mechanisms, and administrative processes related to {topic}.",
+            "why": f"It plays a crucial role in governance, accountability, and democratic functioning.",
+            "articles": "Relevant constitutional or legal provisions apply."
+        }
 
-    # 2️⃣ Extract supporting context from NCERT (optional enrichment)
+    # ---------------- ENRICH USING NCERT ----------------
     full_text = clean_text(" ".join(texts))
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
@@ -159,14 +162,14 @@ def generate_clean_flashcard(texts, topic):
     sent_embeddings = model.encode(sentences)
     scores = cosine_similarity(topic_embedding, sent_embeddings)[0]
 
-    enriched = [
+    enrichment = [
         s for s, sc in sorted(zip(sentences, scores), key=lambda x: x[1], reverse=True)
         if sc > 0.45 and len(s.split()) > 10
     ][:2]
 
-    enrichment = enriched[0] if enriched else ""
+    enrichment_text = enrichment[0] if enrichment else "NCERT discusses this topic in the context of governance and public administration."
 
-    # 3️⃣ Final structured output
+    # ---------------- FINAL OUTPUT ----------------
     return f"""
 ### 📘 {topic.title()} — UPSC Concept Note
 
@@ -186,9 +189,7 @@ def generate_clean_flashcard(texts, topic):
 {base['articles']}
 
 **NCERT Context / Explanation**  
-{enrichment if enrichment else "NCERT discusses this concept in the context of democratic governance and constitutional values."}
-"""
-
+{enrichment_text}
 
 
 
