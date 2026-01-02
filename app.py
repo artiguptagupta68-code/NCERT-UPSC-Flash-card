@@ -122,7 +122,7 @@ def is_meaningful_sentence(sentence, topic):
     return True
 
 CONCEPT_TEMPLATES = {
-    "constitution of india": {
+    "constitution": {
         "what": "The Constitution of India is the supreme law of the country that defines the framework of governance, distribution of powers, and fundamental rights of citizens.",
         "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
         "how": "It establishes the structure of government, distributes powers between Union and States, and provides mechanisms such as judicial review and amendment procedures.",
