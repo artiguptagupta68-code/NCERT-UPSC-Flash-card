@@ -123,7 +123,7 @@ def is_meaningful_sentence(sentence, topic):
 
 
 # ================= FLASHCARD LOGIC =================
-def generate_flashcard(texts, topic):
+def generate_institution_flashcard(texts, topic):
     """
     Generate a structured flashcard for any institution/topic.
     Uses semantic similarity to extract relevant sentences from NCERT texts.
