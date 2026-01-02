@@ -88,10 +88,11 @@ def load_all_text(subject):
     keywords = SUBJECTS.get(subject, [])
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in pdf.name.lower() for k in keywords):
+        if any(k in str(pdf).lower() for k in keywords):
             content = read_pdf(pdf)
-            if len(content.split()) > 80:
+            if len(content.split()) > 60:
                 texts.append(content)
+
     return texts
 
 
