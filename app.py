@@ -14,8 +14,17 @@ FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
+# Subject → keywords mapping
+SUBJECTS = {
+    "Polity": ["constitution", "political", "democracy", "rights", "equality"],
+    "Geography": ["climate", "monsoon", "atmosphere", "landforms", "resources"],
+    "Economics": ["economy", "production", "growth", "market", "development"],
+    "History": ["history", "ancient", "medieval", "modern", "empire"],
+    "Sociology": ["society", "social", "caste", "culture", "community"]
+}
 
-# ================= STREAMLIT SETUP =================
+
+# ================= STREAMLIT =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
 st.title("📘 NCERT → Smart Concept Flashcard Generator")
 
@@ -64,17 +73,22 @@ def read_pdf(path):
         return ""
 
 
-# ================= LOAD ALL PDFs =================
-def load_all_text():
+# ================= LOAD TEXT BY SUBJECT =================
+def load_subject_text(subject):
+    keywords = SUBJECTS.get(subject, [])
     texts = []
+
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        txt = read_pdf(pdf)
-        if len(txt.split()) > 200:
-            texts.append(txt)
+        name = pdf.name.lower()
+        if any(k in name for k in keywords):
+            content = read_pdf(pdf)
+            if len(content.split()) > 200:
+                texts.append(content)
+
     return texts
 
 
-# ================= EMBEDDING MODEL =================
+# ================= MODEL =================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -83,7 +97,7 @@ def load_model():
 model = load_model()
 
 
-# ================= CLEAN & SPLIT =================
+# ================= PROCESSING =================
 def clean_pdf_text(text):
     patterns = [
         r"LET'S DO IT.*", r"LET'S DEBATE.*", r"Reprint.*",
@@ -98,50 +112,39 @@ def split_paragraphs(text):
     return [p.strip() for p in re.split(r'\n{1,}|\.\s{2,}', text) if len(p.split()) > 40]
 
 
-# ================= FLASHCARD LOGIC =================
+# ================= FLASHCARD ENGINE =================
 def generate_flashcard(texts, topic):
-    topic_lower = topic.lower()
-
     full_text = clean_pdf_text(" ".join(texts))
     paragraphs = split_paragraphs(full_text)
 
     if not paragraphs:
         return "⚠️ No readable content found."
 
-    # ---------- Topic Matching ----------
     topic_vec = model.encode(topic, convert_to_tensor=True)
     para_vecs = model.encode(paragraphs, convert_to_tensor=True)
 
-    similarities = util.cos_sim(topic_vec, para_vecs)[0]
-    ranked = sorted(
-        zip(paragraphs, similarities.tolist()),
-        key=lambda x: x[1],
-        reverse=True
-    )
+    scores = util.cos_sim(topic_vec, para_vecs)[0]
+    ranked = sorted(zip(paragraphs, scores.tolist()), key=lambda x: x[1], reverse=True)
 
-    # Keep top relevant paragraphs
-    topic_chunks = [p for p, s in ranked if s > 0.25]
+    # take top relevant blocks
+    top_blocks = [p for p, s in ranked if s > 0.25][:8]
+    if not top_blocks:
+        top_blocks = [p for p, _ in ranked[:5]]
 
-    # Fallback if topic not explicit
-    if not topic_chunks:
-        topic_chunks = [p for p, _ in ranked[:10]]
-
-    # ---------- Extract What / How / Why ----------
     what = how = why = None
 
-    for p in topic_chunks:
+    for p in top_blocks:
         pl = p.lower()
-        if not what and any(x in pl for x in ["is", "means", "refers to", "can be understood"]):
+        if not what and any(k in pl for k in ["is", "means", "refers to", "can be understood"]):
             what = p
-        elif not how and any(x in pl for x in ["works", "functions", "operates", "ensures", "allows"]):
+        elif not how and any(k in pl for k in ["works", "functions", "operates", "ensures", "allows"]):
             how = p
-        elif not why and any(x in pl for x in ["important", "significant", "because", "helps", "role"]):
+        elif not why and any(k in pl for k in ["important", "significant", "helps", "role"]):
             why = p
 
-    # Fallbacks
-    if not what: what = topic_chunks[0]
-    if not how: how = topic_chunks[1] if len(topic_chunks) > 1 else topic_chunks[0]
-    if not why: why = topic_chunks[2] if len(topic_chunks) > 2 else topic_chunks[0]
+    if not what: what = top_blocks[0]
+    if not how: how = top_blocks[1] if len(top_blocks) > 1 else top_blocks[0]
+    if not why: why = top_blocks[2] if len(top_blocks) > 2 else top_blocks[0]
 
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
@@ -157,18 +160,17 @@ def generate_flashcard(texts, topic):
 """
 
 
-# ================= STREAMLIT UI =================
+# ================= UI =================
 download_and_extract()
 
-topic = st.text_input("Enter Concept (e.g. Freedom, Equality, Constitution)")
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Concept (e.g. Equality, Constitution, Climate)")
 
 if st.button("Generate Flashcard"):
-    texts = load_all_text()
-
-    st.write(f"📄 PDFs loaded: {len(texts)}")
+    texts = load_subject_text(subject)
 
     if not texts:
-        st.error("No readable NCERT content found.")
+        st.error("No PDFs found for this subject.")
     else:
         result = generate_flashcard(texts, topic)
         st.markdown(result)
