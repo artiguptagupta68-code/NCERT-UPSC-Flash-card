@@ -51,18 +51,27 @@ def download_and_extract():
 
 # ================= TEXT CLEANING =================
 def clean_text(text):
-    patterns = [
+    noise_patterns = [
         r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
         r"All rights reserved.*", r"University.*",
         r"Editor.*", r"Department.*", r"Email:.*",
         r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
-        r"Prelims\.indd.*"
+        r"Prelims\.indd.*",
+        r"Chapter\s+\d+.*",
+        r"Exercises.*",
+        r"LET’S DEBATE.*",
+        r"Credit:.*",
+        r"www\..*",
+        r"\bFigure\b.*",
+        r"\bTable\b.*"
     ]
 
-    for p in patterns:
+    for p in noise_patterns:
         text = re.sub(p, " ", text, flags=re.I)
 
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
 
 
 def read_pdf(path):
@@ -98,75 +107,77 @@ model = load_model()
 
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
-    combined = clean_text(" ".join(texts))
+    full_text = clean_text(" ".join(texts))
 
-    if len(combined.split()) < 80:
+    if len(full_text.split()) < 120:
         return "⚠️ No meaningful content found."
 
-    sentences = re.split(r'(?<=[.!?])\s+', combined)
-
-    # Chunking
-    chunks, buffer = [], []
-    for s in sentences:
-        if len(s.split()) < 6:
-            continue
-        buffer.append(s)
-        if sum(len(x.split()) for x in buffer) >= 120:
-            chunks.append(" ".join(buffer))
-            buffer = []
-    if buffer:
-        chunks.append(" ".join(buffer))
-
-    # Semantic scoring
-    topic_vec = model.encode([topic])
-    chunk_vecs = model.encode(chunks)
-
-    scored = [
-        (chunk, cosine_similarity([vec], topic_vec)[0][0])
-        for chunk, vec in zip(chunks, chunk_vecs)
-    ]
-
-    if not scored:
-        return "⚠️ No meaningful content found."
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    top_text = " ".join([c for c, _ in scored[:3]])
-
-    # -------- STRUCTURED EXTRACTION --------
-    sentences = re.split(r'(?<=[.!?])\s+', top_text)
+    sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
     what, when, how, why = [], [], [], []
 
     for s in sentences:
-        s_low = s.lower()
+        s_clean = s.strip()
+        s_low = s_clean.lower()
 
-        if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
-            what.append(s)
+        if len(s_clean.split()) < 8:
+            continue
 
-        if any(k in s_low for k in ["adopted", "enacted", "came into force", "1949", "1950"]):
-            when.append(s)
+        # WHAT
+        if any(k in s_low for k in [
+            "is defined as", "refers to", "means", "is a", "is an"
+        ]):
+            what.append(s_clean)
 
-        if any(k in s_low for k in ["works", "functions", "implemented", "interpreted", "enforced"]):
-            how.append(s)
+        # WHEN
+        elif any(k in s_low for k in [
+            "adopted", "enacted", "came into force", "established", "constitution of"
+        ]):
+            when.append(s_clean)
 
-        if any(k in s_low for k in ["important", "ensures", "protects", "essential", "significant"]):
-            why.append(s)
+        # HOW
+        elif any(k in s_low for k in [
+            "functions", "works", "implemented", "interpreted",
+            "enforced", "operates", "applied"
+        ]):
+            how.append(s_clean)
+
+        # WHY
+        elif any(k in s_low for k in [
+            "important", "ensures", "protects", "helps", "essential",
+            "significant", "strengthens"
+        ]):
+            why.append(s_clean)
+
+    # Fallbacks if sections are empty
+    if not what:
+        what = sentences[:2]
+
+    if not when:
+        when = ["The Constitution was adopted in 1950 and continues to evolve through amendments and judicial interpretation."]
+
+    if not how:
+        how = ["It functions through laws, institutions, courts, and democratic processes."]
+
+    if not why:
+        why = ["It safeguards rights, limits state power, and ensures democratic governance."]
 
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **What is it?**  
-{ " ".join(what) if what else top_text[:300] + "..." }
+{' '.join(what[:3])}
 
 **When was it established?**  
-{ " ".join(when) if when else "Established through constitutional development and amendments." }
+{' '.join(when[:2])}
 
 **How does it work?**  
-{ " ".join(how) if how else "It operates through laws, institutions, and judicial interpretation." }
+{' '.join(how[:3])}
 
 **Why is it important?**  
-{ " ".join(why) if why else "It strengthens democracy, rights, and governance." }
+{' '.join(why[:3])}
 """
+
 
 
 # ================= STREAMLIT UI =================
