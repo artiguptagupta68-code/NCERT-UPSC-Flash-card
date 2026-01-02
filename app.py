@@ -75,17 +75,23 @@ def read_pdf(path):
 
 # ================= LOAD TEXT BY SUBJECT =================
 def load_subject_text(subject):
-    keywords = SUBJECTS.get(subject, [])
-    texts = []
+    all_texts = []
+    subject_vec = model.encode(subject, convert_to_tensor=True)
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        name = pdf.name.lower()
-        if any(k in name for k in keywords):
-            content = read_pdf(pdf)
-            if len(content.split()) > 200:
-                texts.append(content)
+        text = read_pdf(pdf)
+        if len(text.split()) < 300:
+            continue
 
-    return texts
+        # Semantic relevance check
+        sample = " ".join(text.split()[:400])
+        sample_vec = model.encode(sample, convert_to_tensor=True)
+        score = util.cos_sim(subject_vec, sample_vec).item()
+
+        if score > 0.25:   # threshold for relevance
+            all_texts.append(text)
+
+    return all_texts
 
 
 # ================= MODEL =================
