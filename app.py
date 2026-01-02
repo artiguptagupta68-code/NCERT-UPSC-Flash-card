@@ -22,8 +22,8 @@ SUBJECTS = {
     "Business Studies": ["business"]
 }
 
-# ================= STREAMLIT =================
-st.set_page_config("NCERT Flashcard Generator", layout="wide")
+# ================= STREAMLIT UI =================
+st.set_page_config(page_title="NCERT Flashcard Generator", layout="wide")
 st.title("📘 NCERT → Smart Concept Flashcard")
 
 # ================= DOWNLOAD & EXTRACT =================
@@ -49,7 +49,7 @@ def download_and_extract():
             pass
 
 
-# ================= CLEAN TEXT =================
+# ================= TEXT CLEANING =================
 def clean_text(text):
     patterns = [
         r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
@@ -62,8 +62,7 @@ def clean_text(text):
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
 
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def read_pdf(path):
@@ -75,7 +74,7 @@ def read_pdf(path):
         return ""
 
 
-# ================= LOAD ALL TEXT =================
+# ================= LOAD TEXT =================
 def load_all_text(subject):
     texts = []
     keywords = SUBJECTS.get(subject, [])
@@ -83,13 +82,13 @@ def load_all_text(subject):
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
         if any(k in str(pdf).lower() for k in keywords):
             content = read_pdf(pdf)
-            if len(content.split()) > 50:
+            if len(content.split()) > 60:
                 texts.append(content)
 
     return texts
 
 
-# ================= EMBEDDING MODEL =================
+# ================= MODEL =================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -97,15 +96,13 @@ def load_model():
 model = load_model()
 
 
-
+# ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
-    combined = " ".join(texts)
-    combined = clean_text(combined)
+    combined = clean_text(" ".join(texts))
 
     if len(combined.split()) < 80:
         return "⚠️ No meaningful content found."
 
-    # Sentence split
     sentences = re.split(r'(?<=[.!?])\s+', combined)
 
     # Chunking
@@ -132,45 +129,56 @@ def generate_flashcard(texts, topic):
     if not scored:
         return "⚠️ No meaningful content found."
 
-    # Sort by relevance
     scored.sort(key=lambda x: x[1], reverse=True)
     top_text = " ".join([c for c, _ in scored[:3]])
 
-    # -------- Structured Extraction --------
+    # -------- STRUCTURED EXTRACTION --------
     sentences = re.split(r'(?<=[.!?])\s+', top_text)
 
-    what_is = []
-    when = []
-    how = []
-    why = []
+    what, when, how, why = [], [], [], []
 
     for s in sentences:
         s_low = s.lower()
 
         if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
-            what_is.append(s)
+            what.append(s)
 
-        if any(k in s_low for k in ["adopted", "enacted", "came into force", "established", "1949", "1950"]):
+        if any(k in s_low for k in ["adopted", "enacted", "came into force", "1949", "1950"]):
             when.append(s)
 
-        if any(k in s_low for k in ["works", "functions", "implemented", "interpreted", "enforced", "applied"]):
+        if any(k in s_low for k in ["works", "functions", "implemented", "interpreted", "enforced"]):
             how.append(s)
 
-        if any(k in s_low for k in ["important", "ensures", "protects", "helps", "essential", "significant"]):
+        if any(k in s_low for k in ["important", "ensures", "protects", "essential", "significant"]):
             why.append(s)
 
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **What is it?**  
-{ " ".join(what_is) if what_is else top_text[:300] + "..." }
+{ " ".join(what) if what else top_text[:300] + "..." }
 
 **When was it established?**  
-{ " ".join(when) if when else "Established through constitutional adoption and subsequent amendments." }
+{ " ".join(when) if when else "Established through constitutional development and amendments." }
 
 **How does it work?**  
-{ " ".join(how) if how else "It functions through laws, institutions, and judicial interpretation." }
+{ " ".join(how) if how else "It operates through laws, institutions, and judicial interpretation." }
 
 **Why is it important?**  
-{ " ".join(why) if why else "It strengthens democracy, protects rights, and ensures justice." }
+{ " ".join(why) if why else "It strengthens democracy, rights, and governance." }
 """
+
+
+# ================= STREAMLIT UI =================
+download_and_extract()
+
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Topic (e.g. Constitution, Fundamental Rights)")
+
+if st.button("Generate Flashcard"):
+    texts = load_all_text(subject)
+    if not texts:
+        st.warning("⚠️ No readable content found for this subject.")
+    else:
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
