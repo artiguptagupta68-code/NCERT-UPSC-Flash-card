@@ -125,39 +125,74 @@ def extract_sentences_for_flashcard(paragraphs, topic):
                 why.append(s)
     return what, when, how, why
 
-def generate_flashcard(text, topic, model):
+def generate_flashcard_advanced(text, topic, model):
+    """
+    Generate an advanced UPSC-style flashcard from NCERT text.
+    """
+    # 1️⃣ Clean and split into paragraphs
     cleaned_text = clean_pdf_text(text)
-    paragraphs = split_into_paragraphs(cleaned_text)
+    paragraphs = split_into_paragraphs(cleaned_text, min_words=30)
     if not paragraphs:
         return "⚠️ No meaningful content found in the PDF."
 
-    ranked_paragraphs = rank_paragraphs_by_topic(paragraphs, topic, model, top_k=5)
-    what, when, how, why = extract_sentences_for_flashcard(ranked_paragraphs, topic)
+    # 2️⃣ Combine paragraphs into larger semantic chunks (2–4 paragraphs each)
+    chunks = []
+    chunk_size = 3
+    for i in range(0, len(paragraphs), chunk_size):
+        combined = " ".join(paragraphs[i:i+chunk_size])
+        chunks.append(combined)
 
-    # Fallbacks
+    # 3️⃣ Rank chunks by similarity to topic
+    topic_emb = model.encode(topic, convert_to_tensor=True)
+    chunk_embs = model.encode(chunks, convert_to_tensor=True)
+    scores = util.cos_sim(topic_emb, chunk_embs)[0]
+    ranked_chunks = sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)
+    top_chunks = [c for c, s in ranked_chunks[:3]]  # Top 3 chunks
+
+    # 4️⃣ Extract sentences for flashcard
+    what, when, how, why = [], [], [], []
+    for chunk in top_chunks:
+        sentences = re.split(r'(?<=[.!?])\s+', chunk)
+        for s in sentences:
+            s_low = s.lower()
+            # WHAT → definition / concept
+            if any(k in s_low for k in ["is", "refers to", "means", "defined as", "understood as", "concept"]):
+                what.append(s)
+            # WHEN → historical / chronological info
+            elif any(k in s_low for k in ["adopted", "established", "came into force", "introduced", "origin", "developed", "formed"]):
+                when.append(s)
+            # HOW → functioning / process / implementation
+            elif any(k in s_low for k in ["works", "functions", "operates", "applies", "ensures", "provides", "implements", "governs"]):
+                how.append(s)
+            # WHY → importance / significance
+            elif any(k in s_low for k in ["important", "significant", "ensures", "protects", "allows", "role", "critical", "essential"]):
+                why.append(s)
+
+    # 5️⃣ Fallbacks: Use top chunk sentences if category empty
     if not what:
-        what = [ranked_paragraphs[0] if ranked_paragraphs else "Content unavailable."]
+        what = [top_chunks[0].split(".")[0] + "."]
     if not when:
-        when = ["Content unavailable."]
+        when = ["Content not clearly specified; refer to historical context in NCERT."]
     if not how:
-        how = [ranked_paragraphs[1] if len(ranked_paragraphs) > 1 else ranked_paragraphs[0]]
+        how = [top_chunks[0].split(".")[1] if len(top_chunks[0].split(".")) > 1 else top_chunks[0]]
     if not why:
-        why = [ranked_paragraphs[2] if len(ranked_paragraphs) > 2 else ranked_paragraphs[0]]
+        why = [top_chunks[0].split(".")[-1]]
 
+    # 6️⃣ Build final flashcard
     flashcard = f"""
 ### 📘 {topic.title()} — UPSC Flashcard
 
 **What is it?**  
-{what[0]}
+{' '.join(what[:2])}
 
 **When was it established?**  
-{when[0]}
+{' '.join(when[:2])}
 
 **How does it work?**  
-{how[0]}
+{' '.join(how[:2])}
 
 **Why is it important?**  
-{why[0]}
+{' '.join(why[:2])}
 """
     return flashcard
 
@@ -173,5 +208,5 @@ if st.button("Generate Flashcard"):
         st.warning("⚠️ No readable content found for this subject.")
     else:
         combined_text = " ".join(texts)
-        result = generate_flashcard(combined_text, topic, model)
+        result = generate_flashcard_advanced(combined_text, topic, model)
         st.markdown(result)
