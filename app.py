@@ -8,14 +8,17 @@ import gdown
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer, util
 
+
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-# ================= STREAMLIT =================
+
+# ================= STREAMLIT SETUP =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT → Smart Concept Flashcard")
+st.title("📘 NCERT → Smart Concept Flashcard Generator")
+
 
 # ================= DOWNLOAD & EXTRACT =================
 def download_and_extract():
@@ -40,7 +43,7 @@ def download_and_extract():
             pass
 
 
-# ================= CLEANING =================
+# ================= TEXT CLEANING =================
 def clean_text(text):
     junk = [
         r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
@@ -61,7 +64,7 @@ def read_pdf(path):
         return ""
 
 
-# ================= LOAD ALL TEXT =================
+# ================= LOAD ALL PDFs =================
 def load_all_text():
     texts = []
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
@@ -71,76 +74,74 @@ def load_all_text():
     return texts
 
 
-# ================= MODEL =================
+# ================= EMBEDDING MODEL =================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
+
 model = load_model()
 
 
-# ================= TEXT CLEANING =================
+# ================= CLEAN & SPLIT =================
 def clean_pdf_text(text):
     patterns = [
         r"LET'S DO IT.*", r"LET'S DEBATE.*", r"Reprint.*",
-        r"Page \d+", r"\b\d+\b", r"©.*", r"Printed.*",
-        r"Activity.*", r"Exercise.*"
+        r"Page \d+", r"©.*", r"Activity.*", r"Exercise.*"
     ]
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
     return re.sub(r"\s+", " ", text).strip()
 
 
-# ================= TOPIC MATCH =================
-def topic_match(paragraph, topic):
-    topic_words = topic.lower().split()
-    paragraph_lower = paragraph.lower()
-
-    if any(word in paragraph_lower for word in topic_words):
-        return True
-
-    para_vec = model.encode(paragraph, convert_to_tensor=True)
-    topic_vec = model.encode(topic, convert_to_tensor=True)
-    score = util.cos_sim(topic_vec, para_vec).item()
-
-    return score > 0.35
+def split_paragraphs(text):
+    return [p.strip() for p in re.split(r'\n{1,}|\.\s{2,}', text) if len(p.split()) > 40]
 
 
-# ================= FLASHCARD GENERATOR =================
+# ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
     topic_lower = topic.lower()
+
     full_text = clean_pdf_text(" ".join(texts))
+    paragraphs = split_paragraphs(full_text)
 
-    paragraphs = [
-        p.strip() for p in re.split(r'\n{1,}|\.\s{2,}', full_text)
-        if len(p.split()) > 40
-    ]
+    if not paragraphs:
+        return "⚠️ No readable content found."
 
-    topic_chunks = [p for p in paragraphs if topic_match(p, topic)]
-
-    if not topic_chunks:
-        return "⚠️ Topic not found clearly in NCERT content."
-
+    # ---------- Topic Matching ----------
     topic_vec = model.encode(topic, convert_to_tensor=True)
-    para_vecs = model.encode(topic_chunks, convert_to_tensor=True)
-    scores = util.cos_sim(topic_vec, para_vecs)[0]
+    para_vecs = model.encode(paragraphs, convert_to_tensor=True)
 
-    ranked = [p for p, _ in sorted(zip(topic_chunks, scores), key=lambda x: x[1], reverse=True)]
+    similarities = util.cos_sim(topic_vec, para_vecs)[0]
+    ranked = sorted(
+        zip(paragraphs, similarities.tolist()),
+        key=lambda x: x[1],
+        reverse=True
+    )
 
+    # Keep top relevant paragraphs
+    topic_chunks = [p for p, s in ranked if s > 0.25]
+
+    # Fallback if topic not explicit
+    if not topic_chunks:
+        topic_chunks = [p for p, _ in ranked[:10]]
+
+    # ---------- Extract What / How / Why ----------
     what = how = why = None
 
-    for p in ranked:
-        low = p.lower()
-        if not what and any(x in low for x in ["is", "means", "refers to", "can be understood"]):
+    for p in topic_chunks:
+        pl = p.lower()
+        if not what and any(x in pl for x in ["is", "means", "refers to", "can be understood"]):
             what = p
-        elif not how and any(x in low for x in ["works", "functions", "operates", "ensures", "provides"]):
+        elif not how and any(x in pl for x in ["works", "functions", "operates", "ensures", "allows"]):
             how = p
-        elif not why and any(x in low for x in ["important", "significant", "because", "role", "helps"]):
+        elif not why and any(x in pl for x in ["important", "significant", "because", "helps", "role"]):
             why = p
 
-    if not what: what = ranked[0]
-    if not how: how = ranked[1] if len(ranked) > 1 else ranked[0]
-    if not why: why = ranked[2] if len(ranked) > 2 else ranked[0]
+    # Fallbacks
+    if not what: what = topic_chunks[0]
+    if not how: how = topic_chunks[1] if len(topic_chunks) > 1 else topic_chunks[0]
+    if not why: why = topic_chunks[2] if len(topic_chunks) > 2 else topic_chunks[0]
 
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
@@ -163,7 +164,11 @@ topic = st.text_input("Enter Concept (e.g. Freedom, Equality, Constitution)")
 
 if st.button("Generate Flashcard"):
     texts = load_all_text()
+
+    st.write(f"📄 PDFs loaded: {len(texts)}")
+
     if not texts:
         st.error("No readable NCERT content found.")
     else:
-        st.markdown(generate_flashcard(texts, topic))
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
