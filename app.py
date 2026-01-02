@@ -114,11 +114,26 @@ def is_why_sentence(s):
 
 
 # ================= FLASHCARD ENGINE =================
-def generate_flashcard(texts, topic):
-    topic_lower = topic.lower()
+
+    def topic_match(paragraph, topic):
+    topic_words = topic.lower().split()
+    paragraph_lower = paragraph.lower()
+
+    # direct keyword match
+    if any(word in paragraph_lower for word in topic_words):
+        return True
+
+    # semantic similarity fallback
+    para_vec = model.encode(paragraph, convert_to_tensor=True)
+    topic_vec = model.encode(topic, convert_to_tensor=True)
+    score = util.cos_sim(topic_vec, para_vec).item()
+
+    return score > 0.35  # safe threshold
+
 
     # ---- Step 1: Clean + chunk text ----
-    full_text = clean_pdf_text(" ".join(texts))
+    def generate_flashcard(texts, topic):
+        full_text = clean_pdf_text(" ".join(texts))
     paragraphs = re.split(r'\n{1,}|\.\s{2,}', full_text)
 
     # Keep only meaningful chunks
