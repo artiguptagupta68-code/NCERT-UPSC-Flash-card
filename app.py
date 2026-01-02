@@ -6,8 +6,8 @@ from pathlib import Path
 import streamlit as st
 import gdown
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer, util
+
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
@@ -47,7 +47,6 @@ def download_and_extract():
         except:
             pass
 
-
 # ================= TEXT CLEANING =================
 def clean_text(text):
     patterns = [
@@ -57,13 +56,10 @@ def clean_text(text):
         r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
         r"Prelims\.indd.*"
     ]
-
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
-
     text = re.sub(r"\s+", " ", text)
     return text.strip()
-
 
 def read_pdf(path):
     try:
@@ -72,7 +68,6 @@ def read_pdf(path):
         return clean_text(text)
     except:
         return ""
-
 
 # ================= LOAD TEXT =================
 def load_all_text(subject):
@@ -84,9 +79,7 @@ def load_all_text(subject):
             content = read_pdf(pdf)
             if len(content.split()) > 60:
                 texts.append(content)
-
     return texts
-
 
 # ================= MODEL =================
 @st.cache_resource
@@ -95,9 +88,7 @@ def load_model():
 
 model = load_model()
 
-
-
-# Knowledge base fallback
+# ================= KNOWLEDGE BASE =================
 KNOWLEDGE_BASE = {
     "constitution": {
         "what": "The Constitution of India is the supreme law that defines the structure, powers, and functions of the government and guarantees fundamental rights.",
@@ -108,17 +99,13 @@ KNOWLEDGE_BASE = {
     }
 }
 
-# ---------------- HELPER FUNCTIONS ----------------
+# ================= HELPER FUNCTIONS =================
 def is_noise(sentence):
-    """Filter out irrelevant lines like page numbers, headers, chapter names"""
     patterns = ["chapter", "figure", "table", "indd", "page", "copyright", "printed", "isbn", "unit", "lesson", "activity", "exercise"]
     sentence = sentence.lower()
     return any(p in sentence for p in patterns)
 
 def split_semantic_chunks(text, max_chunk_size=150):
-    """
-    Split text into semantic chunks of roughly max_chunk_size words
-    """
     sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks, chunk = [], []
     count = 0
@@ -139,37 +126,45 @@ def split_semantic_chunks(text, max_chunk_size=150):
     return chunks
 
 def semantic_ranking(chunks, topic):
-    """Rank chunks by similarity to topic"""
     topic_emb = model.encode(topic, convert_to_tensor=True)
     chunk_embs = model.encode(chunks, convert_to_tensor=True)
     scores = util.cos_sim(topic_emb, chunk_embs)[0]
     ranked = sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)
     return [c for c, s in ranked]
 
-# ---------------- FLASHCARD GENERATION ----------------
+def build_flashcard_from_kb(topic, kb):
+    return f"""
+### 📘 {topic.title()} — UPSC Flashcard
+
+**What is it?**  
+{kb['what']}
+
+**When was it established?**  
+{kb['when']}
+
+**How does it work?**  
+{kb['how']}
+
+**Why is it important?**  
+{kb['why']}
+"""
+
+# ================= FLASHCARD GENERATION =================
 def generate_flashcard(texts, topic):
-    """
-    Generate UPSC-style flashcard
-    """
     full_text = " ".join(texts)
     chunks = split_semantic_chunks(full_text, max_chunk_size=120)
 
     if not chunks:
-        # fallback to knowledge base
         kb = KNOWLEDGE_BASE.get(topic.lower())
         if kb:
             return build_flashcard_from_kb(topic, kb)
         else:
             return "⚠️ No meaningful content found."
 
-    # rank chunks semantically
     ranked_chunks = semantic_ranking(chunks, topic)
-
-    # select top 3 chunks for summarization
     top_chunks = ranked_chunks[:3]
     combined_text = " ".join(top_chunks)
 
-    # categorize sentences
     sentences = re.split(r'(?<=[.!?])\s+', combined_text)
     what, when, how, why = [], [], [], []
 
@@ -184,17 +179,12 @@ def generate_flashcard(texts, topic):
         elif any(k in s_low for k in ["important", "significant", "protects", "democracy", "rule of law", "justice", "unity"]):
             why.append(s)
 
-    # fallback to KB if empty
     kb = KNOWLEDGE_BASE.get(topic.lower())
     if kb:
-        if not what:
-            what = [kb["what"]]
-        if not when:
-            when = [kb["when"]]
-        if not how:
-            how = [kb["how"]]
-        if not why:
-            why = [kb["why"]]
+        if not what: what = [kb["what"]]
+        if not when: when = [kb["when"]]
+        if not how: how = [kb["how"]]
+        if not why: why = [kb["why"]]
 
     return f"""
 ### 📘 {topic.title()} — UPSC Flashcard
@@ -212,3 +202,16 @@ def generate_flashcard(texts, topic):
 {why[0] if why else 'Content unavailable.'}
 """
 
+# ================= STREAMLIT UI =================
+download_and_extract()
+
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Topic (e.g. Constitution, Fundamental Rights)")
+
+if st.button("Generate Flashcard"):
+    texts = load_all_text(subject)
+    if not texts:
+        st.warning("⚠️ No readable content found for this subject.")
+    else:
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
