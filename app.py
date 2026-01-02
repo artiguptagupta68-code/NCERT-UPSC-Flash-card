@@ -125,67 +125,60 @@ def is_meaningful_sentence(sentence, topic):
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
     full_text = clean_text(" ".join(texts))
-
-    if len(full_text.split()) < 120:
-        return "⚠️ No meaningful content found."
-
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
+    if len(sentences) < 20:
+        return "⚠️ Not enough content found."
+
+    # --- Semantic filtering ---
+    topic_embedding = model.encode([topic])
+    sent_embeddings = model.encode(sentences)
+
+    similarities = cosine_similarity(topic_embedding, sent_embeddings)[0]
+
+    # Pick top relevant sentences
+    ranked = sorted(
+        zip(sentences, similarities),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    top_sentences = [s for s, score in ranked[:20] if len(s.split()) > 8]
+
+    if not top_sentences:
+        return "⚠️ Could not extract meaningful content."
+
+    # Categorization
     what, when, how, why = [], [], [], []
 
-    for s in sentences:
-        if len(s.split()) < 8:
-            continue
-
-        if not is_meaningful_sentence(s, topic):
-            continue
-
+    for s in top_sentences:
         s_low = s.lower()
-        s_clean = s.strip()
 
-        # WHAT
-        if any(k in s_low for k in ["is defined as", "refers to", "means", "is a", "is an"]):
-            what.append(s_clean)
-
-        # WHEN
-        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "established"]):
-            when.append(s_clean)
-
-        # HOW
-        elif any(k in s_low for k in ["functions", "works", "implemented", "interpreted", "enforced", "operates", "applied"]):
-            how.append(s_clean)
-
-        # WHY
-        elif any(k in s_low for k in ["important", "ensures", "protects", "helps", "essential", "significant", "strengthens"]):
-            why.append(s_clean)
-
-    if not what:
-        what = sentences[:2]
-
-    if not when:
-        when = ["The Constitution was adopted in 1950 and continues to evolve through amendments and judicial interpretation."]
-
-    if not how:
-        how = ["It functions through laws, institutions, courts, and democratic processes."]
-
-    if not why:
-        why = ["It safeguards rights, limits state power, and ensures democratic governance."]
+        if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
+            what.append(s)
+        elif any(k in s_low for k in ["adopted", "enacted", "came into force"]):
+            when.append(s)
+        elif any(k in s_low for k in ["provides", "ensures", "lays down", "establishes", "regulates"]):
+            how.append(s)
+        elif any(k in s_low for k in ["important", "significant", "protects", "strengthens"]):
+            why.append(s)
 
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **What is it?**  
-{' '.join(what[:3])}
+{what[0] if what else top_sentences[0]}
 
 **When was it established?**  
-{' '.join(when[:2])}
+{when[0] if when else "The Constitution of India came into force on 26 January 1950."}
 
 **How does it work?**  
-{' '.join(how[:3])}
+{how[0] if how else top_sentences[1]}
 
 **Why is it important?**  
-{' '.join(why[:3])}
+{why[0] if why else top_sentences[2]}
 """
+
 
 
 # ================= STREAMLIT UI =================
