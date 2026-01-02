@@ -197,4 +197,4 @@ def generate_flashcard(text, topic, model):
 {why[0]}
 """
     return flashcard
-)
+
