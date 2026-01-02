@@ -100,118 +100,101 @@ KNOWLEDGE_BASE = {
 }
 
 # ================= HELPER FUNCTIONS =================
-def is_noise(sentence):
-    patterns = ["chapter", "figure", "table", "indd", "page", "copyright", "printed", "isbn", "unit", "lesson", "activity", "exercise"]
-    sentence = sentence.lower()
-    return any(p in sentence for p in patterns)
+from sentence_transformers import SentenceTransformer, util
+import re
 
-def split_semantic_chunks(text, max_chunk_size=150):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    chunks, chunk = [], []
-    count = 0
-    for s in sentences:
-        if is_noise(s):
-            continue
-        words = len(s.split())
-        if words + count > max_chunk_size:
-            if chunk:
-                chunks.append(" ".join(chunk))
-            chunk = [s]
-            count = words
-        else:
-            chunk.append(s)
-            count += words
-    if chunk:
-        chunks.append(" ".join(chunk))
-    return chunks
+# ---------------- HELPER FUNCTIONS ----------------
+def clean_pdf_text(text):
+    """
+    Remove noise like page numbers, exercises, boxes, reprints, etc.
+    """
+    # Remove page numbers, Reprint, LET'S DO IT/DEBATE, etc.
+    patterns = [
+        r"\b\d+\b", r"Reprint.*", r"LET'S DO IT.*", r"LET'S DEBATE.*", 
+        r"Swaraj", r"Prelims\.indd.*", r"\s+", r"Page \d+", r"©.*", r"Printed.*"
+    ]
+    for p in patterns:
+        text = re.sub(p, " ", text, flags=re.I)
+    return text.strip()
 
-def semantic_ranking(chunks, topic):
+def split_into_paragraphs(text, min_words=20):
+    """
+    Split text into paragraphs of at least min_words words
+    """
+    paragraphs = re.split(r'\n{1,}|\.\s+', text)
+    cleaned_paragraphs = [p.strip() for p in paragraphs if len(p.split()) >= min_words]
+    return cleaned_paragraphs
+
+def rank_paragraphs_by_topic(paragraphs, topic, model, top_k=5):
+    """
+    Rank paragraphs using semantic embeddings
+    """
     topic_emb = model.encode(topic, convert_to_tensor=True)
-    chunk_embs = model.encode(chunks, convert_to_tensor=True)
-    scores = util.cos_sim(topic_emb, chunk_embs)[0]
-    ranked = sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)
-    return [c for c, s in ranked]
+    para_embs = model.encode(paragraphs, convert_to_tensor=True)
+    scores = util.cos_sim(topic_emb, para_embs)[0]
+    ranked = sorted(zip(paragraphs, scores.tolist()), key=lambda x: x[1], reverse=True)
+    return [p for p, s in ranked[:top_k]]
 
-def build_flashcard_from_kb(topic, kb):
-    return f"""
-### 📘 {topic.title()} — UPSC Flashcard
-
-**What is it?**  
-{kb['what']}
-
-**When was it established?**  
-{kb['when']}
-
-**How does it work?**  
-{kb['how']}
-
-**Why is it important?**  
-{kb['why']}
-"""
-
-# ================= FLASHCARD GENERATION =================
-def generate_flashcard(texts, topic):
-    full_text = " ".join(texts)
-    chunks = split_semantic_chunks(full_text, max_chunk_size=120)
-
-    if not chunks:
-        kb = KNOWLEDGE_BASE.get(topic.lower())
-        if kb:
-            return build_flashcard_from_kb(topic, kb)
-        else:
-            return "⚠️ No meaningful content found."
-
-    ranked_chunks = semantic_ranking(chunks, topic)
-    top_chunks = ranked_chunks[:3]
-    combined_text = " ".join(top_chunks)
-
-    sentences = re.split(r'(?<=[.!?])\s+', combined_text)
+def extract_sentences_for_flashcard(paragraphs, topic):
+    """
+    Extract sentences for What / When / How / Why
+    """
     what, when, how, why = [], [], [], []
+    for para in paragraphs:
+        sentences = re.split(r'(?<=[.!?])\s+', para)
+        for s in sentences:
+            s_low = s.lower()
+            # WHAT → definition / concept
+            if any(k in s_low for k in ["is", "refers to", "means", "defined as", "understood as"]):
+                what.append(s)
+            # WHEN → historical or chronological info
+            elif any(k in s_low for k in ["adopted", "established", "came into force", "introduced", "origin", "developed"]):
+                when.append(s)
+            # HOW → functioning / process / implementation
+            elif any(k in s_low for k in ["works", "functions", "operates", "applies", "ensures", "provides"]):
+                how.append(s)
+            # WHY → importance / significance
+            elif any(k in s_low for k in ["important", "significant", "ensures", "protects", "allows", "role"]):
+                why.append(s)
+    return what, when, how, why
 
-    for s in sentences:
-        s_low = s.lower()
-        if any(k in s_low for k in ["is", "refers to", "means", "defined as", "explains"]):
-            what.append(s)
-        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "established", "constitution of india"]):
-            when.append(s)
-        elif any(k in s_low for k in ["provides", "establishes", "lays down", "regulates", "ensures", "distribution of powers", "judiciary", "fundamental rights", "directive principles"]):
-            how.append(s)
-        elif any(k in s_low for k in ["important", "significant", "protects", "democracy", "rule of law", "justice", "unity"]):
-            why.append(s)
+def generate_flashcard(text, topic, model):
+    """
+    Generate an exam-ready flashcard
+    """
+    cleaned_text = clean_pdf_text(text)
+    paragraphs = split_into_paragraphs(cleaned_text)
+    if not paragraphs:
+        return "⚠️ No meaningful content found in the PDF."
 
-    kb = KNOWLEDGE_BASE.get(topic.lower())
-    if kb:
-        if not what: what = [kb["what"]]
-        if not when: when = [kb["when"]]
-        if not how: how = [kb["how"]]
-        if not why: why = [kb["why"]]
+    ranked_paragraphs = rank_paragraphs_by_topic(paragraphs, topic, model, top_k=5)
+    what, when, how, why = extract_sentences_for_flashcard(ranked_paragraphs, topic)
 
-    return f"""
+    # Fallbacks
+    if not what:
+        what = [ranked_paragraphs[0] if ranked_paragraphs else "Content unavailable."]
+    if not when:
+        when = ["Content unavailable."]
+    if not how:
+        how = [ranked_paragraphs[1] if len(ranked_paragraphs) > 1 else ranked_paragraphs[0]]
+    if not why:
+        why = [ranked_paragraphs[2] if len(ranked_paragraphs) > 2 else ranked_paragraphs[0]]
+
+    # Build flashcard
+    flashcard = f"""
 ### 📘 {topic.title()} — UPSC Flashcard
 
 **What is it?**  
-{what[0] if what else 'Content unavailable.'}
+{what[0]}
 
 **When was it established?**  
-{when[0] if when else 'Content unavailable.'}
+{when[0]}
 
 **How does it work?**  
-{how[0] if how else 'Content unavailable.'}
+{how[0]}
 
 **Why is it important?**  
-{why[0] if why else 'Content unavailable.'}
+{why[0]}
 """
-
-# ================= STREAMLIT UI =================
-download_and_extract()
-
-subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-topic = st.text_input("Enter Topic (e.g. Constitution, Fundamental Rights)")
-
-if st.button("Generate Flashcard"):
-    texts = load_all_text(subject)
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        result = generate_flashcard(texts, topic)
-        st.markdown(result)
+    return flashcard
+)
