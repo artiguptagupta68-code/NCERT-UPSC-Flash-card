@@ -8,24 +8,38 @@ import gdown
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+
+
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
 SUBJECTS = {
-    "Polity": ["polity", "constitution"],
-    "Economics": ["economics"],
-    "Sociology": ["sociology"],
-    "Psychology": ["psychology"],
-    "Business Studies": ["business"]
+    "Polity": ["constitution", "polity", "rights", "parliament", "judiciary"],
+    "Economics": ["economics", "growth", "development"],
+    "Sociology": ["society", "social"],
+    "Psychology": ["psychology", "behavior"],
+    "Business Studies": ["business", "management"]
 }
 
-# ================= STREAMLIT UI =================
+# ================= KNOWLEDGE BASE =================
+KNOWLEDGE_BASE = {
+    "constitution": {
+        "what": "The Constitution of India is the supreme law that defines the structure, powers, and functions of the government and guarantees fundamental rights.",
+        "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
+        "how": "It distributes powers among the Legislature, Executive, and Judiciary and provides mechanisms for governance and accountability.",
+        "why": "It ensures democracy, rule of law, and protection of citizens’ rights.",
+        "articles": "Articles 1–395; Parts III, IV, V–XI."
+    }
+}
+
+# ================= STREAMLIT =================
 st.set_page_config(page_title="NCERT Flashcard Generator", layout="wide")
 st.title("📘 NCERT → Smart Concept Flashcard")
 
-# ================= DOWNLOAD & EXTRACT =================
+
+# ================= DOWNLOAD =================
 def download_and_extract():
     if not os.path.exists(ZIP_PATH):
         gdown.download(
@@ -53,23 +67,17 @@ def clean_text(text):
     patterns = [
         r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
         r"All rights reserved.*", r"University.*",
-        r"Editor.*", r"Department.*", r"Email:.*",
-        r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
-        r"Prelims\.indd.*"
+        r"Editor.*", r"Department.*", r"Email:.*"
     ]
-
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
-
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def read_pdf(path):
     try:
         reader = PdfReader(path)
-        text = " ".join(p.extract_text() or "" for p in reader.pages)
-        return clean_text(text)
+        return clean_text(" ".join(p.extract_text() or "" for p in reader.pages))
     except:
         return ""
 
@@ -80,11 +88,10 @@ def load_all_text(subject):
     keywords = SUBJECTS.get(subject, [])
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
-        if any(k in str(pdf).lower() for k in keywords):
+        if any(k in pdf.name.lower() for k in keywords):
             content = read_pdf(pdf)
-            if len(content.split()) > 60:
+            if len(content.split()) > 80:
                 texts.append(content)
-
     return texts
 
 
@@ -96,116 +103,75 @@ def load_model():
 model = load_model()
 
 
-def is_meaningful_sentence(sentence, topic):
-    s = sentence.lower()
+# ================= CORE LOGIC =================
+def identify_topic(text):
+    text_emb = model.encode(text)
+    scores = {}
 
-    if any(x in s for x in [
-        "edition", "printed", "copyright", "price",
-        "isbn", "publication", "reprint", "press",
-        "chapter", "page", "figure", "table"
-    ]):
-        return False
+    for topic in KNOWLEDGE_BASE:
+        topic_emb = model.encode(topic)
+        scores[topic] = cosine_similarity([text_emb], [topic_emb])[0][0]
 
-    concept_verbs = [
-        "is", "are", "means", "refers", "defines", "explains",
-        "ensures", "protects", "establishes", "allows",
-        "governs", "regulates", "interprets"
-    ]
+    return max(scores, key=scores.get)
 
-    if not any(v in s for v in concept_verbs):
-        return False
 
-    topic_words = topic.lower().split()
-    if not any(t in s for t in topic_words):
-        return False
+def extract_supporting_sentences(text, topic):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    relevant = []
 
-    return True
+    for s in sentences:
+        if topic in s.lower() and len(s.split()) > 10:
+            relevant.append(s)
 
-def generate_clean_flashcard(texts, topic):
-    topic_key = topic.lower().strip()
+    return relevant[:3]
 
-    # ---------------- TEMPLATE DATABASE ----------------
-    CONCEPT_TEMPLATES = {
-        "constitution of india": {
-            "what": "The Constitution of India is the supreme law of the country that defines the framework of governance, distribution of powers, and fundamental rights of citizens.",
-            "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
-            "how": "It establishes the structure of government, distributes powers between Union and States, and provides mechanisms such as judicial review and constitutional amendments.",
-            "why": "It ensures rule of law, protects fundamental rights, and maintains democratic governance.",
-            "articles": "Articles 1–395; Part III (Fundamental Rights), Part IV (DPSP), Article 368."
-        },
-        "election commission of india": {
-            "what": "The Election Commission of India is an independent constitutional authority responsible for conducting free and fair elections.",
-            "when": "It was established on 25 January 1950 under Article 324 of the Constitution.",
-            "how": "It supervises elections, prepares electoral rolls, and enforces the Model Code of Conduct.",
-            "why": "It ensures free, fair, and transparent elections in a democratic system.",
-            "articles": "Article 324 of the Constitution."
-        }
-    }
 
-    base = CONCEPT_TEMPLATES.get(topic_key)
+def generate_flashcard(texts, topic):
+    full_text = " ".join(texts)
+    topic_key = identify_topic(full_text)
 
-    # ---------------- FALLBACK LOGIC ----------------
+    base = KNOWLEDGE_BASE.get(topic_key)
+
     if not base:
-        base = {
-            "what": f"{topic.title()} is an important concept in the Indian political and constitutional system.",
-            "when": "It evolved through constitutional, legal, or institutional developments over time.",
-            "how": f"It functions through legal provisions, institutional mechanisms, and administrative processes related to {topic}.",
-            "why": f"It plays a crucial role in governance, accountability, and democratic functioning.",
-            "articles": "Relevant constitutional or legal provisions apply."
-        }
+        return "⚠️ No knowledge base available for this topic."
 
-    # ---------------- ENRICH USING NCERT ----------------
-    full_text = clean_text(" ".join(texts))
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)
+    support = extract_supporting_sentences(full_text, topic_key)
+    support_text = " ".join(support) if support else "NCERT discusses this concept in multiple contexts."
 
-    topic_embedding = model.encode([topic])
-    sent_embeddings = model.encode(sentences)
-    scores = cosine_similarity(topic_embedding, sent_embeddings)[0]
-
-    enrichment = [
-        s for s, sc in sorted(zip(sentences, scores), key=lambda x: x[1], reverse=True)
-        if sc > 0.45 and len(s.split()) > 10
-    ][:2]
-
-    enrichment_text = enrichment[0] if enrichment else "NCERT discusses this topic in the context of governance and public administration."
-
-    # ---------------- FINAL OUTPUT ----------------
     return f"""
-### 📘 {topic.title()} — UPSC Concept Note
+## 📘 {topic_key.upper()} — UPSC FLASHCARD
 
-**What is it?**  
+### What is it?
 {base['what']}
 
-**When was it established?**  
+### When was it established?
 {base['when']}
 
-**How does it work?**  
+### How does it work?
 {base['how']}
 
-**Why is it important?**  
+### Why is it important?
 {base['why']}
 
-**Relevant Articles / Sections**  
+### Relevant Articles
 {base['articles']}
 
-**NCERT Context / Explanation**  
-{enrichment_text}
-
-
+### NCERT Context
+{support_text}
 """
 
 
-
-# ================= STREAMLIT UI =================
+# ================= UI =================
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-topic = st.text_input("Enter Institution / Topic (e.g., Constitution, Election Commission, RBI)")
+topic = st.text_input("Enter Topic (e.g. Constitution, Judiciary)")
 
 if st.button("Generate Flashcard"):
     texts = load_all_text(subject)
+
     if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
+        st.warning("⚠️ No readable NCERT content found.")
     else:
-        flashcard = generate_clean_flashcard(texts, topic)
-        st.markdown(flashcard)
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
