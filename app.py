@@ -124,70 +124,72 @@ def is_meaningful_sentence(sentence, topic):
 
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
+    """
+    Generate a structured flashcard for any institution/topic.
+    Uses semantic similarity to extract relevant sentences from NCERT texts.
+    """
+
+    # Combine all text and clean
     full_text = clean_text(" ".join(texts))
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
-    if len(sentences) < 30:
-        return "⚠️ Not enough content to generate a meaningful explanation."
+    if len(sentences) < 20:
+        return "⚠️ Not enough content to generate a meaningful flashcard."
 
-    # --- Semantic similarity ---
+    # --- Encode topic and sentences ---
     topic_embedding = model.encode([topic])
     sentence_embeddings = model.encode(sentences)
 
+    # --- Compute similarity ---
     similarity_scores = cosine_similarity(topic_embedding, sentence_embeddings)[0]
 
+    # --- Rank sentences by relevance ---
     ranked_sentences = sorted(
         zip(sentences, similarity_scores),
         key=lambda x: x[1],
         reverse=True
     )
 
-    # Select top relevant sentences
-    core_sentences = [s for s, score in ranked_sentences[:25] if len(s.split()) > 10]
+    # Take top relevant sentences (ignore very short ones)
+    top_sentences = [s for s, score in ranked_sentences[:30] if len(s.split()) > 8]
 
-    if not core_sentences:
-        return "⚠️ Relevant content not found."
+    if not top_sentences:
+        return "⚠️ Could not find relevant content."
 
-    # -------- Categorization --------
+    # -------- Categorize sentences into flashcard sections --------
     what, when, how, why = [], [], [], []
 
-    for s in core_sentences:
+    for s in top_sentences:
         s_low = s.lower()
 
-        if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
+        # WHAT: definition, purpose, nature
+        if any(k in s_low for k in ["is", "refers to", "means", "defined as", "constitutes"]):
             what.append(s)
 
-        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "constitution of india"]):
+        # WHEN: established, formed, started
+        elif any(k in s_low for k in ["established", "formed", "created", "set up", "came into force"]):
             when.append(s)
 
-        elif any(k in s_low for k in [
-            "provides", "establishes", "lays down", "regulates",
-            "ensures", "distribution of powers", "judiciary",
-            "fundamental rights", "directive principles"
-        ]):
+        # HOW: functions, operations, structure, roles
+        elif any(k in s_low for k in ["functions", "powers", "responsible for", "administers", "operates", "ensures"]):
             how.append(s)
 
-        elif any(k in s_low for k in [
-            "important", "significant", "protects", "ensures justice",
-            "democracy", "unity", "rule of law"
-        ]):
+        # WHY: importance, relevance, significance
+        elif any(k in s_low for k in ["important", "significant", "ensures", "safeguards", "role of", "critical"]):
             why.append(s)
 
-    # ---------- Smart Fallbacks ----------
+    # -------- Fallbacks if any section is empty --------
     if not what:
-        what = core_sentences[:2]
-
+        what = top_sentences[:2]
     if not when:
-        when = ["The Constitution of India was adopted on 26 November 1949 and came into force on 26 January 1950."]
-
+        when = ["The institution was established to ensure proper functioning and governance."]
     if not how:
-        how = core_sentences[2:4]
-
+        how = top_sentences[2:4]
     if not why:
-        why = core_sentences[4:6]
+        why = top_sentences[4:6]
 
-    # ---------- FINAL OUTPUT ----------
-    return f"""
+    # -------- Construct Flashcard --------
+    flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
 **What is it?**  
@@ -202,6 +204,8 @@ def generate_flashcard(texts, topic):
 **Why is it important?**  
 {why[0]}
 """
+    return flashcard
+
 
 
 
