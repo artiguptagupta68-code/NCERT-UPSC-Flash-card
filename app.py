@@ -126,7 +126,25 @@ def extract_sentences_for_flashcard(paragraphs, topic):
     return what, when, how, why
 
 from sentence_transformers import util
-import re
+# ================= KNOWLEDGE BASE (fallback) =================
+KNOWLEDGE_BASE = {
+    "constitution": {
+        "what": "The Constitution of India is the supreme law that defines the structure, powers, and functions of the government and guarantees fundamental rights.",
+        "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
+        "how": "It distributes powers among the Legislature, Executive, and Judiciary and provides mechanisms for governance and accountability.",
+        "why": "It ensures democracy, rule of law, and protection of citizens’ rights.",
+        "articles": "Articles 1–395; Parts III, IV, V–XI."
+    },
+    "freedom": {
+        "what": "Freedom is the absence of external constraints and the ability of individuals to make autonomous choices.",
+        "when": "Freedom has been debated and evolved throughout history in political thought and practice.",
+        "how": "It works by protecting individual rights through laws, democratic institutions, and social norms.",
+        "why": "It is essential for human development, self-realization, and participatory democracy.",
+        "articles": "Related constitutional provisions on fundamental rights."
+    }
+    # Add more topics here as needed
+}
+
 
 def generate_flashcard(texts, topic, model, top_k_chunks=5, top_k_sentences=3):
     """
