@@ -6,8 +6,7 @@ from pathlib import Path
 import streamlit as st
 import gdown
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer, util
 
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
@@ -73,7 +72,7 @@ def load_all_text():
     return texts
 
 
-# ================= EMBEDDINGS =================
+# ================= MODEL =================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -81,34 +80,23 @@ def load_model():
 model = load_model()
 
 
-# ================= CLEANING & FILTERING =================
-
+# ================= CLEAN & SPLIT =================
 def clean_pdf_text(text):
-    # Remove noise and page junk
     patterns = [
-        r"LET'S DO IT.*",
-        r"LET'S DEBATE.*",
-        r"Reprint.*",
-        r"Page \d+",
-        r"\b\d+\b",
-        r"©.*",
-        r"Printed.*",
-        r"Activity.*",
-        r"Exercise.*"
+        r"LET'S DO IT.*", r"LET'S DEBATE.*", r"Reprint.*",
+        r"Page \d+", r"\b\d+\b", r"©.*", r"Printed.*",
+        r"Activity.*", r"Exercise.*"
     ]
     for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def split_sentences(text):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    return [s.strip() for s in sentences if len(s.split()) > 8]
+    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if len(s.split()) > 8]
 
 
-# ================= SEMANTIC FILTER =================
-
+# ================= CLASSIFIERS =================
 def is_definition_sentence(s):
     return any(k in s.lower() for k in [
         "is", "means", "refers to", "can be understood", "defined as"
@@ -125,37 +113,34 @@ def is_why_sentence(s):
     ])
 
 
-# ================= CORE FLASHCARD ENGINE =================
-
+# ================= FLASHCARD ENGINE =================
 def generate_flashcard(texts, topic):
     full_text = clean_pdf_text(" ".join(texts))
     sentences = split_sentences(full_text)
 
-    # semantic ranking
     topic_vec = model.encode(topic, convert_to_tensor=True)
     sent_vecs = model.encode(sentences, convert_to_tensor=True)
     scores = util.cos_sim(topic_vec, sent_vecs)[0]
 
     ranked = sorted(zip(sentences, scores.tolist()), key=lambda x: x[1], reverse=True)
-    top_sentences = [s for s, _ in ranked[:40]]
+    top = [s for s, _ in ranked[:40]]
 
     what, how, why = [], [], []
 
-    for s in top_sentences:
-        if is_definition_sentence(s) and not what:
+    for s in top:
+        if not what and is_definition_sentence(s):
             what.append(s)
-        elif is_how_sentence(s) and not how:
+        elif not how and is_how_sentence(s):
             how.append(s)
-        elif is_why_sentence(s) and not why:
+        elif not why and is_why_sentence(s):
             why.append(s)
 
-    # Fallbacks if something is missing
-    if not what and top_sentences:
-        what.append(top_sentences[0])
-    if not how and len(top_sentences) > 1:
-        how.append(top_sentences[1])
-    if not why and len(top_sentences) > 2:
-        why.append(top_sentences[2])
+    if not what and top:
+        what.append(top[0])
+    if not how and len(top) > 1:
+        how.append(top[1])
+    if not why and len(top) > 2:
+        why.append(top[2])
 
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
@@ -169,3 +154,17 @@ def generate_flashcard(texts, topic):
 **Why is it important?**  
 {why[0]}
 """
+
+
+# ================= STREAMLIT UI =================
+download_and_extract()
+
+topic = st.text_input("Enter Concept (e.g. Freedom, Equality, Constitution)")
+
+if st.button("Generate Flashcard"):
+    texts = load_all_text()
+    if not texts:
+        st.error("No readable NCERT content found.")
+    else:
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
