@@ -125,76 +125,77 @@ def extract_sentences_for_flashcard(paragraphs, topic):
                 why.append(s)
     return what, when, how, why
 
-def generate_flashcard_advanced(text, topic, model):
+def generate_flashcard_summarized(text, topic, model):
     """
-    Generate an advanced UPSC-style flashcard from NCERT text.
+    Generate a concise, exam-ready flashcard with summary per section
     """
-    # 1️⃣ Clean and split into paragraphs
+    # Clean and split paragraphs
     cleaned_text = clean_pdf_text(text)
     paragraphs = split_into_paragraphs(cleaned_text, min_words=30)
     if not paragraphs:
         return "⚠️ No meaningful content found in the PDF."
 
-    # 2️⃣ Combine paragraphs into larger semantic chunks (2–4 paragraphs each)
+    # Combine 2–3 paragraphs into chunks for context
     chunks = []
     chunk_size = 3
     for i in range(0, len(paragraphs), chunk_size):
-        combined = " ".join(paragraphs[i:i+chunk_size])
-        chunks.append(combined)
+        chunks.append(" ".join(paragraphs[i:i+chunk_size]))
 
-    # 3️⃣ Rank chunks by similarity to topic
+    # Rank chunks by semantic similarity to topic
     topic_emb = model.encode(topic, convert_to_tensor=True)
     chunk_embs = model.encode(chunks, convert_to_tensor=True)
     scores = util.cos_sim(topic_emb, chunk_embs)[0]
-    ranked_chunks = sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)
-    top_chunks = [c for c, s in ranked_chunks[:3]]  # Top 3 chunks
+    ranked_chunks = [c for c, s in sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)]
+    top_chunks = ranked_chunks[:3]  # top 3 relevant chunks
 
-    # 4️⃣ Extract sentences for flashcard
-    what, when, how, why = [], [], [], []
+    # Split sentences from top chunks
+    sentences = []
     for chunk in top_chunks:
-        sentences = re.split(r'(?<=[.!?])\s+', chunk)
-        for s in sentences:
-            s_low = s.lower()
-            # WHAT → definition / concept
-            if any(k in s_low for k in ["is", "refers to", "means", "defined as", "understood as", "concept"]):
-                what.append(s)
-            # WHEN → historical / chronological info
-            elif any(k in s_low for k in ["adopted", "established", "came into force", "introduced", "origin", "developed", "formed"]):
-                when.append(s)
-            # HOW → functioning / process / implementation
-            elif any(k in s_low for k in ["works", "functions", "operates", "applies", "ensures", "provides", "implements", "governs"]):
-                how.append(s)
-            # WHY → importance / significance
-            elif any(k in s_low for k in ["important", "significant", "ensures", "protects", "allows", "role", "critical", "essential"]):
-                why.append(s)
+        sents = re.split(r'(?<=[.!?])\s+', chunk)
+        sentences.extend([s.strip() for s in sents if len(s.split()) > 6])
 
-    # 5️⃣ Fallbacks: Use top chunk sentences if category empty
-    if not what:
-        what = [top_chunks[0].split(".")[0] + "."]
-    if not when:
-        when = ["Content not clearly specified; refer to historical context in NCERT."]
-    if not how:
-        how = [top_chunks[0].split(".")[1] if len(top_chunks[0].split(".")) > 1 else top_chunks[0]]
-    if not why:
-        why = [top_chunks[0].split(".")[-1]]
+    # Rank sentences by semantic similarity to topic
+    sent_embs = model.encode(sentences, convert_to_tensor=True)
+    sent_scores = util.cos_sim(topic_emb, sent_embs)[0]
+    ranked_sentences = [s for s, score in sorted(zip(sentences, sent_scores.tolist()), key=lambda x: x[1], reverse=True)]
 
-    # 6️⃣ Build final flashcard
+    # Assign sentences to sections intelligently
+    what, when, how, why = [], [], [], []
+    for s in ranked_sentences:
+        s_low = s.lower()
+        if any(k in s_low for k in ["is", "refers to", "means", "defined as", "concept", "swaraj", "freedom"]):
+            if len(what) < 2: what.append(s)
+        elif any(k in s_low for k in ["adopted", "established", "came into force", "introduced", "origin", "developed"]):
+            if len(when) < 2: when.append(s)
+        elif any(k in s_low for k in ["works", "functions", "operates", "applies", "ensures", "provides", "implements"]):
+            if len(how) < 2: how.append(s)
+        elif any(k in s_low for k in ["important", "significant", "ensures", "protects", "allows", "role", "critical"]):
+            if len(why) < 2: why.append(s)
+
+    # Fallbacks from top sentences
+    if not what: what = [ranked_sentences[0]] if ranked_sentences else ["Content unavailable."]
+    if not when: when = ["Content not clearly specified; refer to historical context in NCERT."]
+    if not how: how = [ranked_sentences[1] if len(ranked_sentences) > 1 else ranked_sentences[0]]
+    if not why: why = [ranked_sentences[2] if len(ranked_sentences) > 2 else ranked_sentences[0]]
+
+    # Build flashcard
     flashcard = f"""
 ### 📘 {topic.title()} — UPSC Flashcard
 
 **What is it?**  
-{' '.join(what[:2])}
+{' '.join(what)}
 
 **When was it established?**  
-{' '.join(when[:2])}
+{' '.join(when)}
 
 **How does it work?**  
-{' '.join(how[:2])}
+{' '.join(how)}
 
 **Why is it important?**  
-{' '.join(why[:2])}
+{' '.join(why)}
 """
     return flashcard
+
 
 # ================= STREAMLIT APP =================
 download_and_extract()
@@ -208,5 +209,5 @@ if st.button("Generate Flashcard"):
         st.warning("⚠️ No readable content found for this subject.")
     else:
         combined_text = " ".join(texts)
-        result = generate_flashcard_advanced(combined_text, topic, model)
+        result = generate_flashcard_summarized(combined_text, topic, model)
         st.markdown(result)
