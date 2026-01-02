@@ -51,22 +51,15 @@ def download_and_extract():
 
 # ================= TEXT CLEANING =================
 def clean_text(text):
-    noise_patterns = [
+    patterns = [
         r"ISBN.*", r"Reprint.*", r"Printed.*", r"©.*",
         r"All rights reserved.*", r"University.*",
         r"Editor.*", r"Department.*", r"Email:.*",
         r"\b\d{1,2}\s[A-Za-z]+\s\d{4}\b",
-        r"Prelims\.indd.*",
-        r"Chapter\s+\d+.*",
-        r"Exercises.*",
-        r"LET’S DEBATE.*",
-        r"Credit:.*",
-        r"www\..*",
-        r"\bFigure\b.*",
-        r"\bTable\b.*"
+        r"Prelims\.indd.*"
     ]
 
-    for p in noise_patterns:
+    for p in patterns:
         text = re.sub(p, " ", text, flags=re.I)
 
     text = re.sub(r"\s+", " ", text)
