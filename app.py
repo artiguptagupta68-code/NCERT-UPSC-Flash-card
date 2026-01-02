@@ -119,39 +119,73 @@ def split_paragraphs(text):
 
 
 # ================= FLASHCARD ENGINE =================
+def extract_chapter_structure(text, topic):
+    """
+    Split NCERT text into:
+    - About/Introduction
+    - Subheadings (What, How, Why, Types of...)
+    """
+    text_lower = text.lower()
+    if topic.lower() not in text_lower:
+        return None  # topic not present in this chapter
+
+    # Split into paragraphs (rough)
+    paragraphs = re.split(r'\n{1,}|\.\s{2,}', text)
+
+    # Identify subheadings: lines in Title Case or uppercase
+    heading_regex = re.compile(r'^(?:[A-Z][A-Za-z\s]{3,60}|[A-Z\s]{5,})$')
+    structured = {}
+    current_heading = "About"
+    structured[current_heading] = []
+
+    for para in paragraphs:
+        para_clean = para.strip()
+        if not para_clean:
+            continue
+        if heading_regex.match(para_clean):
+            current_heading = para_clean
+            structured[current_heading] = []
+        else:
+            structured[current_heading].append(para_clean)
+
+    # Convert lists to full paragraphs
+    for k in structured:
+        structured[k] = " ".join(structured[k]).strip()
+
+    return structured
+
+def map_flashcard_fields(structured):
+    """
+    Map subheadings to flashcard fields: What / How / Why
+    """
+    what, how, why = None, None, None
+
+    for heading, para in structured.items():
+        h_low = heading.lower()
+        if not what and any(k in h_low for k in ["what", "meaning", "nature"]):
+            what = para
+        elif not how and any(k in h_low for k in ["how", "formation", "process", "types"]):
+            how = para
+        elif not why and any(k in h_low for k in ["why", "importance", "significance"]):
+            why = para
+
+    # Fallbacks if not found
+    headings = list(structured.keys())
+    if not what:
+        what = structured.get("About", headings[0] if headings else "Content unavailable.")
+    if not how:
+        how = structured.get(headings[1], what)
+    if not why:
+        why = structured.get(headings[2], what)
+
+    return what, how, why
+
 def generate_flashcard(texts, topic):
-    full_text = clean_pdf_text(" ".join(texts))
-    paragraphs = split_paragraphs(full_text)
-
-    if not paragraphs:
-        return "⚠️ No readable content found."
-
-    topic_vec = model.encode(topic, convert_to_tensor=True)
-    para_vecs = model.encode(paragraphs, convert_to_tensor=True)
-
-    scores = util.cos_sim(topic_vec, para_vecs)[0]
-    ranked = sorted(zip(paragraphs, scores.tolist()), key=lambda x: x[1], reverse=True)
-
-    # take top relevant blocks
-    top_blocks = [p for p, s in ranked if s > 0.25][:8]
-    if not top_blocks:
-        top_blocks = [p for p, _ in ranked[:5]]
-
-    what = how = why = None
-
-    for p in top_blocks:
-        pl = p.lower()
-        if not what and any(k in pl for k in ["is", "means", "refers to", "can be understood"]):
-            what = p
-        elif not how and any(k in pl for k in ["works", "functions", "operates", "ensures", "allows"]):
-            how = p
-        elif not why and any(k in pl for k in ["important", "significant", "helps", "role"]):
-            why = p
-
-    if not what: what = top_blocks[0]
-    if not how: how = top_blocks[1] if len(top_blocks) > 1 else top_blocks[0]
-    if not why: why = top_blocks[2] if len(top_blocks) > 2 else top_blocks[0]
-
+    combined_text = " ".join(texts)
+    structured = extract_chapter_structure(combined_text, topic)
+    if not structured:
+        return "⚠️ Topic not found clearly in NCERT content."
+    what, how, why = map_flashcard_fields(structured)
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
 
@@ -165,18 +199,16 @@ def generate_flashcard(texts, topic):
 {why}
 """
 
-
-# ================= UI =================
+# ================= STREAMLIT UI =================
 download_and_extract()
 
-subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-topic = st.text_input("Enter Concept (e.g. Equality, Constitution, Climate)")
+subject = st.selectbox("Select Subject", options=list(SUBJECTS.keys()))
+topic = st.text_input("Enter Concept / Topic (e.g., Freedom, Groups, Constitution)")
 
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
-
     if not texts:
-        st.error("No PDFs found for this subject.")
+        st.error(f"No PDFs found for subject '{subject}'.")
     else:
         result = generate_flashcard(texts, topic)
         st.markdown(result)
