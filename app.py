@@ -7,7 +7,6 @@ import streamlit as st
 import gdown
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
@@ -66,7 +65,6 @@ def clean_text(text):
     return text.strip()
 
 
-
 def read_pdf(path):
     try:
         reader = PdfReader(path)
@@ -97,10 +95,10 @@ def load_model():
 
 model = load_model()
 
+
 def is_meaningful_sentence(sentence, topic):
     s = sentence.lower()
 
-    # Reject obvious junk
     if any(x in s for x in [
         "edition", "printed", "copyright", "price",
         "isbn", "publication", "reprint", "press",
@@ -108,7 +106,6 @@ def is_meaningful_sentence(sentence, topic):
     ]):
         return False
 
-    # Must contain a concept verb
     concept_verbs = [
         "is", "are", "means", "refers", "defines", "explains",
         "ensures", "protects", "establishes", "allows",
@@ -118,12 +115,12 @@ def is_meaningful_sentence(sentence, topic):
     if not any(v in s for v in concept_verbs):
         return False
 
-    # Must be related to topic
     topic_words = topic.lower().split()
     if not any(t in s for t in topic_words):
         return False
 
     return True
+
 
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
@@ -136,40 +133,32 @@ def generate_flashcard(texts, topic):
 
     what, when, how, why = [], [], [], []
 
- for s in sentences:
-     if len(s.split()) < 8:
-         continue
+    for s in sentences:
+        if len(s.split()) < 8:
+            continue
 
-if not is_meaningful_sentence(s, topic):
-    continue
+        if not is_meaningful_sentence(s, topic):
+            continue
+
+        s_low = s.lower()
+        s_clean = s.strip()
 
         # WHAT
-        if any(k in s_low for k in [
-            "is defined as", "refers to", "means", "is a", "is an"
-        ]):
+        if any(k in s_low for k in ["is defined as", "refers to", "means", "is a", "is an"]):
             what.append(s_clean)
 
         # WHEN
-        elif any(k in s_low for k in [
-            "adopted", "enacted", "came into force", "established", "constitution of"
-        ]):
+        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "established"]):
             when.append(s_clean)
 
         # HOW
-        elif any(k in s_low for k in [
-            "functions", "works", "implemented", "interpreted",
-            "enforced", "operates", "applied"
-        ]):
+        elif any(k in s_low for k in ["functions", "works", "implemented", "interpreted", "enforced", "operates", "applied"]):
             how.append(s_clean)
 
         # WHY
-        elif any(k in s_low for k in [
-            "important", "ensures", "protects", "helps", "essential",
-            "significant", "strengthens"
-        ]):
+        elif any(k in s_low for k in ["important", "ensures", "protects", "helps", "essential", "significant", "strengthens"]):
             why.append(s_clean)
 
-    # Fallbacks if sections are empty
     if not what:
         what = sentences[:2]
 
@@ -197,7 +186,6 @@ if not is_meaningful_sentence(s, topic):
 **Why is it important?**  
 {' '.join(why[:3])}
 """
-
 
 
 # ================= STREAMLIT UI =================
