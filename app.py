@@ -137,8 +137,8 @@ def generate_flashcard(texts, topic):
     what, when, how, why = [], [], [], []
 
     for s in sentences:
-    if len(s.split()) < 8:
-        continue
+        if len(s.split()) < 8:
+            continue
 
     if not is_meaningful_sentence(s, topic):
         continue
