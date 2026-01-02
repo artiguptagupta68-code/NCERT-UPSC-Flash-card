@@ -97,6 +97,33 @@ def load_model():
 
 model = load_model()
 
+def is_meaningful_sentence(sentence, topic):
+    s = sentence.lower()
+
+    # Reject obvious junk
+    if any(x in s for x in [
+        "edition", "printed", "copyright", "price",
+        "isbn", "publication", "reprint", "press",
+        "chapter", "page", "figure", "table"
+    ]):
+        return False
+
+    # Must contain a concept verb
+    concept_verbs = [
+        "is", "are", "means", "refers", "defines", "explains",
+        "ensures", "protects", "establishes", "allows",
+        "governs", "regulates", "interprets"
+    ]
+
+    if not any(v in s for v in concept_verbs):
+        return False
+
+    # Must be related to topic
+    topic_words = topic.lower().split()
+    if not any(t in s for t in topic_words):
+        return False
+
+    return True
 
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
@@ -110,11 +137,11 @@ def generate_flashcard(texts, topic):
     what, when, how, why = [], [], [], []
 
     for s in sentences:
-        s_clean = s.strip()
-        s_low = s_clean.lower()
+    if len(s.split()) < 8:
+        continue
 
-        if len(s_clean.split()) < 8:
-            continue
+    if not is_meaningful_sentence(s, topic):
+        continue
 
         # WHAT
         if any(k in s_low for k in [
