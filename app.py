@@ -127,57 +127,82 @@ def generate_flashcard(texts, topic):
     full_text = clean_text(" ".join(texts))
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
-    if len(sentences) < 20:
-        return "⚠️ Not enough content found."
+    if len(sentences) < 30:
+        return "⚠️ Not enough content to generate a meaningful explanation."
 
-    # --- Semantic filtering ---
+    # --- Semantic similarity ---
     topic_embedding = model.encode([topic])
-    sent_embeddings = model.encode(sentences)
+    sentence_embeddings = model.encode(sentences)
 
-    similarities = cosine_similarity(topic_embedding, sent_embeddings)[0]
+    similarity_scores = cosine_similarity(topic_embedding, sentence_embeddings)[0]
 
-    # Pick top relevant sentences
-    ranked = sorted(
-        zip(sentences, similarities),
+    ranked_sentences = sorted(
+        zip(sentences, similarity_scores),
         key=lambda x: x[1],
         reverse=True
     )
 
-    top_sentences = [s for s, score in ranked[:20] if len(s.split()) > 8]
+    # Select top relevant sentences
+    core_sentences = [s for s, score in ranked_sentences[:25] if len(s.split()) > 10]
 
-    if not top_sentences:
-        return "⚠️ Could not extract meaningful content."
+    if not core_sentences:
+        return "⚠️ Relevant content not found."
 
-    # Categorization
+    # -------- Categorization --------
     what, when, how, why = [], [], [], []
 
-    for s in top_sentences:
+    for s in core_sentences:
         s_low = s.lower()
 
         if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
             what.append(s)
-        elif any(k in s_low for k in ["adopted", "enacted", "came into force"]):
+
+        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "constitution of india"]):
             when.append(s)
-        elif any(k in s_low for k in ["provides", "ensures", "lays down", "establishes", "regulates"]):
+
+        elif any(k in s_low for k in [
+            "provides", "establishes", "lays down", "regulates",
+            "ensures", "distribution of powers", "judiciary",
+            "fundamental rights", "directive principles"
+        ]):
             how.append(s)
-        elif any(k in s_low for k in ["important", "significant", "protects", "strengthens"]):
+
+        elif any(k in s_low for k in [
+            "important", "significant", "protects", "ensures justice",
+            "democracy", "unity", "rule of law"
+        ]):
             why.append(s)
 
+    # ---------- Smart Fallbacks ----------
+    if not what:
+        what = core_sentences[:2]
+
+    if not when:
+        when = ["The Constitution of India was adopted on 26 November 1949 and came into force on 26 January 1950."]
+
+    if not how:
+        how = core_sentences[2:4]
+
+    if not why:
+        why = core_sentences[4:6]
+
+    # ---------- FINAL OUTPUT ----------
     return f"""
 ### 📘 {topic} — Concept Summary
 
 **What is it?**  
-{what[0] if what else top_sentences[0]}
+{what[0]}
 
 **When was it established?**  
-{when[0] if when else "The Constitution of India came into force on 26 January 1950."}
+{when[0]}
 
 **How does it work?**  
-{how[0] if how else top_sentences[1]}
+{how[0]}
 
 **Why is it important?**  
-{why[0] if why else top_sentences[2]}
+{why[0]}
 """
+
 
 
 
