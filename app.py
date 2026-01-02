@@ -96,126 +96,119 @@ def load_model():
 model = load_model()
 
 
-def is_meaningful_sentence(sentence, topic):
-    s = sentence.lower()
 
-    if any(x in s for x in [
-        "edition", "printed", "copyright", "price",
-        "isbn", "publication", "reprint", "press",
-        "chapter", "page", "figure", "table"
-    ]):
-        return False
+# Knowledge base fallback
+KNOWLEDGE_BASE = {
+    "constitution": {
+        "what": "The Constitution of India is the supreme law that defines the structure, powers, and functions of the government and guarantees fundamental rights.",
+        "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
+        "how": "It distributes powers among the Legislature, Executive, and Judiciary and provides mechanisms for governance and accountability.",
+        "why": "It ensures democracy, rule of law, and protection of citizens’ rights.",
+        "articles": "Articles 1–395; Parts III, IV, V–XI."
+    }
+}
 
-    concept_verbs = [
-        "is", "are", "means", "refers", "defines", "explains",
-        "ensures", "protects", "establishes", "allows",
-        "governs", "regulates", "interprets"
-    ]
+# ---------------- HELPER FUNCTIONS ----------------
+def is_noise(sentence):
+    """Filter out irrelevant lines like page numbers, headers, chapter names"""
+    patterns = ["chapter", "figure", "table", "indd", "page", "copyright", "printed", "isbn", "unit", "lesson", "activity", "exercise"]
+    sentence = sentence.lower()
+    return any(p in sentence for p in patterns)
 
-    if not any(v in s for v in concept_verbs):
-        return False
+def split_semantic_chunks(text, max_chunk_size=150):
+    """
+    Split text into semantic chunks of roughly max_chunk_size words
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks, chunk = [], []
+    count = 0
+    for s in sentences:
+        if is_noise(s):
+            continue
+        words = len(s.split())
+        if words + count > max_chunk_size:
+            if chunk:
+                chunks.append(" ".join(chunk))
+            chunk = [s]
+            count = words
+        else:
+            chunk.append(s)
+            count += words
+    if chunk:
+        chunks.append(" ".join(chunk))
+    return chunks
 
-    topic_words = topic.lower().split()
-    if not any(t in s for t in topic_words):
-        return False
+def semantic_ranking(chunks, topic):
+    """Rank chunks by similarity to topic"""
+    topic_emb = model.encode(topic, convert_to_tensor=True)
+    chunk_embs = model.encode(chunks, convert_to_tensor=True)
+    scores = util.cos_sim(topic_emb, chunk_embs)[0]
+    ranked = sorted(zip(chunks, scores.tolist()), key=lambda x: x[1], reverse=True)
+    return [c for c, s in ranked]
 
-    return True
-
-
-# ================= FLASHCARD LOGIC =================
+# ---------------- FLASHCARD GENERATION ----------------
 def generate_flashcard(texts, topic):
-    full_text = clean_text(" ".join(texts))
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)
+    """
+    Generate UPSC-style flashcard
+    """
+    full_text = " ".join(texts)
+    chunks = split_semantic_chunks(full_text, max_chunk_size=120)
 
-    if len(sentences) < 30:
-        return "⚠️ Not enough content to generate a meaningful explanation."
+    if not chunks:
+        # fallback to knowledge base
+        kb = KNOWLEDGE_BASE.get(topic.lower())
+        if kb:
+            return build_flashcard_from_kb(topic, kb)
+        else:
+            return "⚠️ No meaningful content found."
 
-    # --- Semantic similarity ---
-    topic_embedding = model.encode([topic])
-    sentence_embeddings = model.encode(sentences)
+    # rank chunks semantically
+    ranked_chunks = semantic_ranking(chunks, topic)
 
-    similarity_scores = cosine_similarity(topic_embedding, sentence_embeddings)[0]
+    # select top 3 chunks for summarization
+    top_chunks = ranked_chunks[:3]
+    combined_text = " ".join(top_chunks)
 
-    ranked_sentences = sorted(
-        zip(sentences, similarity_scores),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    # Select top relevant sentences
-    core_sentences = [s for s, score in ranked_sentences[:25] if len(s.split()) > 10]
-
-    if not core_sentences:
-        return "⚠️ Relevant content not found."
-
-    # -------- Categorization --------
+    # categorize sentences
+    sentences = re.split(r'(?<=[.!?])\s+', combined_text)
     what, when, how, why = [], [], [], []
 
-    for s in core_sentences:
+    for s in sentences:
         s_low = s.lower()
-
-        if any(k in s_low for k in ["is", "refers to", "means", "defined as"]):
+        if any(k in s_low for k in ["is", "refers to", "means", "defined as", "explains"]):
             what.append(s)
-
-        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "constitution of india"]):
+        elif any(k in s_low for k in ["adopted", "enacted", "came into force", "established", "constitution of india"]):
             when.append(s)
-
-        elif any(k in s_low for k in [
-            "provides", "establishes", "lays down", "regulates",
-            "ensures", "distribution of powers", "judiciary",
-            "fundamental rights", "directive principles"
-        ]):
+        elif any(k in s_low for k in ["provides", "establishes", "lays down", "regulates", "ensures", "distribution of powers", "judiciary", "fundamental rights", "directive principles"]):
             how.append(s)
-
-        elif any(k in s_low for k in [
-            "important", "significant", "protects", "ensures justice",
-            "democracy", "unity", "rule of law"
-        ]):
+        elif any(k in s_low for k in ["important", "significant", "protects", "democracy", "rule of law", "justice", "unity"]):
             why.append(s)
 
-    # ---------- Smart Fallbacks ----------
-    if not what:
-        what = core_sentences[:2]
+    # fallback to KB if empty
+    kb = KNOWLEDGE_BASE.get(topic.lower())
+    if kb:
+        if not what:
+            what = [kb["what"]]
+        if not when:
+            when = [kb["when"]]
+        if not how:
+            how = [kb["how"]]
+        if not why:
+            why = [kb["why"]]
 
-    if not when:
-        when = ["The Constitution of India was adopted on 26 November 1949 and came into force on 26 January 1950."]
-
-    if not how:
-        how = core_sentences[2:4]
-
-    if not why:
-        why = core_sentences[4:6]
-
-    # ---------- FINAL OUTPUT ----------
     return f"""
-### 📘 {topic} — Concept Summary
+### 📘 {topic.title()} — UPSC Flashcard
 
 **What is it?**  
-{what[0]}
+{what[0] if what else 'Content unavailable.'}
 
 **When was it established?**  
-{when[0]}
+{when[0] if when else 'Content unavailable.'}
 
 **How does it work?**  
-{how[0]}
+{how[0] if how else 'Content unavailable.'}
 
 **Why is it important?**  
-{why[0]}
+{why[0] if why else 'Content unavailable.'}
 """
 
-
-
-
-# ================= STREAMLIT UI =================
-download_and_extract()
-
-subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-topic = st.text_input("Enter Topic (e.g. Constitution, Fundamental Rights)")
-
-if st.button("Generate Flashcard"):
-    texts = load_all_text(subject)
-    if not texts:
-        st.warning("⚠️ No readable content found for this subject.")
-    else:
-        result = generate_flashcard(texts, topic)
-        st.markdown(result)
