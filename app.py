@@ -121,103 +121,74 @@ def is_meaningful_sentence(sentence, topic):
 
     return True
 
+CONCEPT_TEMPLATES = {
+    "constitution of india": {
+        "what": "The Constitution of India is the supreme law of the country that defines the framework of governance, distribution of powers, and fundamental rights of citizens.",
+        "when": "It was adopted on 26 November 1949 and came into force on 26 January 1950.",
+        "how": "It establishes the structure of government, distributes powers between Union and States, and provides mechanisms such as judicial review and amendment procedures.",
+        "why": "It ensures rule of law, protects fundamental rights, and maintains democratic governance.",
+        "articles": "Articles 1–395; Part III (Fundamental Rights), Part IV (DPSP), Article 368 (Amendment)."
+    },
+
+    "election commission of india": {
+        "what": "The Election Commission of India is an independent constitutional body responsible for conducting free and fair elections.",
+        "when": "It was established on 25 January 1950 under Article 324 of the Constitution.",
+        "how": "It supervises elections, prepares electoral rolls, enforces the Model Code of Conduct, and regulates political parties.",
+        "why": "It ensures democratic legitimacy and prevents electoral malpractice.",
+        "articles": "Article 324 of the Constitution."
+    }
+}
+
+
 
 # ================= FLASHCARD LOGIC =================
-def generate_upscready_flashcard(texts, topic):
-    """
-    Generates UPSC-ready flashcards with:
-    - Definition / What
-    - Establishment / When
-    - Functioning / How
-    - Importance / Why
-    - Articles / Sections / Clauses
-    - Examples / Real-life context
-    """
+def generate_clean_flashcard(texts, topic):
+    topic_key = topic.lower().strip()
 
+    # 1️⃣ Load base template
+    base = CONCEPT_TEMPLATES.get(topic_key, None)
+
+    if not base:
+        return "⚠️ Topic not found in knowledge base. Please add a template."
+
+    # 2️⃣ Extract supporting context from NCERT (optional enrichment)
     full_text = clean_text(" ".join(texts))
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
 
-    if len(sentences) < 20:
-        return "⚠️ Not enough content to generate a meaningful flashcard."
-
-    # --- Encode topic and sentences ---
     topic_embedding = model.encode([topic])
-    sentence_embeddings = model.encode(sentences)
-    similarity_scores = cosine_similarity(topic_embedding, sentence_embeddings)[0]
+    sent_embeddings = model.encode(sentences)
+    scores = cosine_similarity(topic_embedding, sent_embeddings)[0]
 
-    # --- Rank sentences by similarity ---
-    ranked_sentences = sorted(
-        zip(sentences, similarity_scores),
-        key=lambda x: x[1],
-        reverse=True
-    )
+    enriched = [
+        s for s, sc in sorted(zip(sentences, scores), key=lambda x: x[1], reverse=True)
+        if sc > 0.45 and len(s.split()) > 10
+    ][:2]
 
-    # Select top relevant sentences
-    top_sentences = [s for s, score in ranked_sentences[:35] if len(s.split()) > 8]
+    enrichment = enriched[0] if enriched else ""
 
-    if not top_sentences:
-        return "⚠️ Could not find relevant content."
-
-    # -------- Categorize sentences --------
-    what, when, how, why, articles, examples = [], [], [], [], [], []
-
-    for s in top_sentences:
-        s_low = s.lower()
-        # WHAT: definition / purpose
-        if any(k in s_low for k in ["is", "refers to", "means", "defined as", "constitutes"]):
-            what.append(s)
-        # WHEN: established / formed
-        elif any(k in s_low for k in ["established", "formed", "created", "set up", "came into force", "adopted"]):
-            when.append(s)
-        # HOW: functions / operations / powers
-        elif any(k in s_low for k in ["functions", "powers", "responsible for", "administers", "operates", "ensures", "provides"]):
-            how.append(s)
-        # WHY: importance / significance
-        elif any(k in s_low for k in ["important", "significant", "ensures", "safeguards", "role of", "critical"]):
-            why.append(s)
-        # ARTICLES / SECTIONS
-        elif "article" in s_low or "part" in s_low or "section" in s_low or "clause" in s_low:
-            articles.append(s)
-        # EXAMPLES / REAL-LIFE
-        elif any(k in s_low for k in ["example", "instance", "case study", "such as", "applied in"]):
-            examples.append(s)
-
-    # -------- Fallbacks if empty --------
-    if not what:
-        what = [f"The {topic} is a key constitutional/institutional concept in India."]
-    if not when:
-        if topic.lower() == "constitution":
-            when = ["The Constitution of India was adopted on 26 November 1949 and came into force on 26 January 1950."]
-        else:
-            when = ["This institution/concept was established to serve its constitutional and social purpose."]
-    if not how: how = top_sentences[2:4] or ["It functions through its constitutional/organizational powers and responsibilities."]
-    if not why: why = top_sentences[4:6] or ["It is important for governance, law, and public administration."]
-    if not articles: articles = ["Refer to the relevant Articles, Sections, or Clauses in the Constitution/Act."]
-    if not examples: examples = ["Example: Relevant case studies or real-life application."]
-
-    # -------- Construct flashcard --------
-    flashcard = f"""
-### 📘 {topic} — Advanced UPSC Flashcard
+    # 3️⃣ Final structured output
+    return f"""
+### 📘 {topic.title()} — UPSC Concept Note
 
 **What is it?**  
-{what[0]}
+{base['what']}
 
 **When was it established?**  
-{when[0]}
+{base['when']}
 
 **How does it work?**  
-{how[0]}
+{base['how']}
 
 **Why is it important?**  
-{why[0]}
+{base['why']}
 
 **Relevant Articles / Sections**  
-{articles[0]}
+{base['articles']}
 
-**Examples / Real-life Context**  
-{examples[0]}
+**NCERT Context / Explanation**  
+{enrichment if enrichment else "NCERT discusses this concept in the context of democratic governance and constitutional values."}
 """
-    return flashcard
+
 
 
 
@@ -235,5 +206,5 @@ if st.button("Generate Flashcard"):
     if not texts:
         st.warning("⚠️ No readable content found for this subject.")
     else:
-        flashcard = generate_upscready_flashcard(texts, topic)
+        flashcard = generate_clean_flashcard(texts, topic)
         st.markdown(flashcard)
