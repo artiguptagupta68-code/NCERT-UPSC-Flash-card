@@ -123,71 +123,79 @@ def is_meaningful_sentence(sentence, topic):
 
 
 # ================= FLASHCARD LOGIC =================
-def generate_advanced_flashcard(texts, topic):
+def generate_upscready_flashcard(texts, topic):
     """
-    Generates UPSC-ready, context-rich flashcards with:
+    Generates UPSC-ready flashcards with:
     - Definition / What
     - Establishment / When
     - Functioning / How
     - Importance / Why
-    - Articles / Key Features / Examples
+    - Articles / Sections / Clauses
+    - Examples / Real-life context
     """
-    
+
     full_text = clean_text(" ".join(texts))
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
-    
+
     if len(sentences) < 20:
         return "⚠️ Not enough content to generate a meaningful flashcard."
 
-    # Encode topic and sentences
+    # --- Encode topic and sentences ---
     topic_embedding = model.encode([topic])
     sentence_embeddings = model.encode(sentences)
     similarity_scores = cosine_similarity(topic_embedding, sentence_embeddings)[0]
 
-    # Rank and select top relevant sentences
+    # --- Rank sentences by similarity ---
     ranked_sentences = sorted(
         zip(sentences, similarity_scores),
         key=lambda x: x[1],
         reverse=True
     )
+
+    # Select top relevant sentences
     top_sentences = [s for s, score in ranked_sentences[:35] if len(s.split()) > 8]
 
     if not top_sentences:
         return "⚠️ Could not find relevant content."
 
-    # Categorization
+    # -------- Categorize sentences --------
     what, when, how, why, articles, examples = [], [], [], [], [], []
 
     for s in top_sentences:
         s_low = s.lower()
-        # WHAT
+        # WHAT: definition / purpose
         if any(k in s_low for k in ["is", "refers to", "means", "defined as", "constitutes"]):
             what.append(s)
-        # WHEN
-        elif any(k in s_low for k in ["established", "formed", "created", "set up", "came into force"]):
+        # WHEN: established / formed
+        elif any(k in s_low for k in ["established", "formed", "created", "set up", "came into force", "adopted"]):
             when.append(s)
-        # HOW
+        # HOW: functions / operations / powers
         elif any(k in s_low for k in ["functions", "powers", "responsible for", "administers", "operates", "ensures", "provides"]):
             how.append(s)
-        # WHY
+        # WHY: importance / significance
         elif any(k in s_low for k in ["important", "significant", "ensures", "safeguards", "role of", "critical"]):
             why.append(s)
         # ARTICLES / SECTIONS
-        elif "article" in s_low or "section" in s_low or "clause" in s_low:
+        elif "article" in s_low or "part" in s_low or "section" in s_low or "clause" in s_low:
             articles.append(s)
-        # EXAMPLES
-        elif any(k in s_low for k in ["example", "instance", "case study", "such as"]):
+        # EXAMPLES / REAL-LIFE
+        elif any(k in s_low for k in ["example", "instance", "case study", "such as", "applied in"]):
             examples.append(s)
 
-    # Fallbacks if empty
-    if not what: what = top_sentences[:2]
-    if not when: when = ["This institution/concept was established to serve its constitutional and social purpose."]
-    if not how: how = top_sentences[2:4]
-    if not why: why = top_sentences[4:6]
-    if not articles: articles = ["Refer to the relevant Articles or Sections in the Constitution/Act."]
-    if not examples: examples = ["Example: Real-life implementation or case study relevant to the institution."]
+    # -------- Fallbacks if empty --------
+    if not what:
+        what = [f"The {topic} is a key constitutional/institutional concept in India."]
+    if not when:
+        if topic.lower() == "constitution":
+            when = ["The Constitution of India was adopted on 26 November 1949 and came into force on 26 January 1950."]
+        else:
+            when = ["This institution/concept was established to serve its constitutional and social purpose."]
+    if not how: how = top_sentences[2:4] or ["It functions through its constitutional/organizational powers and responsibilities."]
+    if not why: why = top_sentences[4:6] or ["It is important for governance, law, and public administration."]
+    if not articles: articles = ["Refer to the relevant Articles, Sections, or Clauses in the Constitution/Act."]
+    if not examples: examples = ["Example: Relevant case studies or real-life application."]
 
-    # Construct flashcard
+    # -------- Construct flashcard --------
     flashcard = f"""
 ### 📘 {topic} — Advanced UPSC Flashcard
 
@@ -220,12 +228,12 @@ def generate_advanced_flashcard(texts, topic):
 download_and_extract()
 
 subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
-topic = st.text_input("Enter Institution / Topic (e.g., Election Commission, RBI, Fundamental Rights)")
+topic = st.text_input("Enter Institution / Topic (e.g., Constitution, Election Commission, RBI)")
 
 if st.button("Generate Flashcard"):
     texts = load_all_text(subject)
     if not texts:
         st.warning("⚠️ No readable content found for this subject.")
     else:
-        flashcard = generate_advanced_flashcard(texts, topic)
+        flashcard = generate_upscready_flashcard(texts, topic)
         st.markdown(flashcard)
