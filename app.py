@@ -49,8 +49,7 @@ def clean_text(text):
     ]
     for j in junk:
         text = re.sub(j, " ", text, flags=re.I)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def read_pdf(path):
@@ -80,7 +79,7 @@ def load_model():
 model = load_model()
 
 
-# ================= CLEAN & SPLIT =================
+# ================= TEXT CLEANING =================
 def clean_pdf_text(text):
     patterns = [
         r"LET'S DO IT.*", r"LET'S DEBATE.*", r"Reprint.*",
@@ -92,88 +91,53 @@ def clean_pdf_text(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-def split_sentences(text):
-    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if len(s.split()) > 8]
-
-
-# ================= CLASSIFIERS =================
-def is_definition_sentence(s):
-    return any(k in s.lower() for k in [
-        "is", "means", "refers to", "can be understood", "defined as"
-    ])
-
-def is_how_sentence(s):
-    return any(k in s.lower() for k in [
-        "works", "functions", "operates", "ensures", "allows", "enables"
-    ])
-
-def is_why_sentence(s):
-    return any(k in s.lower() for k in [
-        "important", "significant", "because", "so that", "helps", "ensures"
-    ])
-
-
-# ================= FLASHCARD ENGINE =================
-
-    def topic_match(paragraph, topic):
+# ================= TOPIC MATCH =================
+def topic_match(paragraph, topic):
     topic_words = topic.lower().split()
     paragraph_lower = paragraph.lower()
 
-    # direct keyword match
     if any(word in paragraph_lower for word in topic_words):
         return True
 
-    # semantic similarity fallback
     para_vec = model.encode(paragraph, convert_to_tensor=True)
     topic_vec = model.encode(topic, convert_to_tensor=True)
     score = util.cos_sim(topic_vec, para_vec).item()
 
-    return score > 0.35  # safe threshold
+    return score > 0.35
 
 
-    # ---- Step 1: Clean + chunk text ----
-    def generate_flashcard(texts, topic):
-        full_text = clean_pdf_text(" ".join(texts))
-    paragraphs = re.split(r'\n{1,}|\.\s{2,}', full_text)
+# ================= FLASHCARD GENERATOR =================
+def generate_flashcard(texts, topic):
+    topic_lower = topic.lower()
+    full_text = clean_pdf_text(" ".join(texts))
 
-    # Keep only meaningful chunks
     paragraphs = [
-        p.strip() for p in paragraphs
+        p.strip() for p in re.split(r'\n{1,}|\.\s{2,}', full_text)
         if len(p.split()) > 40
     ]
 
-    # ---- Step 2: Filter by topic presence ----
-    topic_chunks = [
-        p for p in paragraphs
-        if topic_lower in p.lower()
-    ]
+    topic_chunks = [p for p in paragraphs if topic_match(p, topic)]
 
     if not topic_chunks:
         return "⚠️ Topic not found clearly in NCERT content."
 
-    # ---- Step 3: Semantic ranking inside topic-only chunks ----
     topic_vec = model.encode(topic, convert_to_tensor=True)
     para_vecs = model.encode(topic_chunks, convert_to_tensor=True)
-
     scores = util.cos_sim(topic_vec, para_vecs)[0]
+
     ranked = [p for p, _ in sorted(zip(topic_chunks, scores), key=lambda x: x[1], reverse=True)]
 
-    # ---- Step 4: Extract meaning sections ----
-    what, how, why = None, None, None
+    what = how = why = None
 
     for p in ranked:
-        p_low = p.lower()
-
-        if not what and any(x in p_low for x in ["is", "means", "refers to", "can be understood"]):
+        low = p.lower()
+        if not what and any(x in low for x in ["is", "means", "refers to", "can be understood"]):
             what = p
-
-        if not how and any(x in p_low for x in ["works", "functions", "operates", "ensures", "provides"]):
+        elif not how and any(x in low for x in ["works", "functions", "operates", "ensures", "provides"]):
             how = p
-
-        if not why and any(x in p_low for x in ["important", "significant", "because", "role", "helps"]):
+        elif not why and any(x in low for x in ["important", "significant", "because", "role", "helps"]):
             why = p
 
-    # Fallbacks
     if not what: what = ranked[0]
     if not how: how = ranked[1] if len(ranked) > 1 else ranked[0]
     if not why: why = ranked[2] if len(ranked) > 2 else ranked[0]
@@ -192,7 +156,6 @@ def is_why_sentence(s):
 """
 
 
-
 # ================= STREAMLIT UI =================
 download_and_extract()
 
@@ -203,5 +166,4 @@ if st.button("Generate Flashcard"):
     if not texts:
         st.error("No readable NCERT content found.")
     else:
-        result = generate_flashcard(texts, topic)
-        st.markdown(result)
+        st.markdown(generate_flashcard(texts, topic))
