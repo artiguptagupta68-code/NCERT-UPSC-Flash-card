@@ -7,7 +7,7 @@ import streamlit as st
 import gdown
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
-
+from sklearn.metrics.pairwise import cosine_similarity
 # ================= CONFIG =================
 FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
