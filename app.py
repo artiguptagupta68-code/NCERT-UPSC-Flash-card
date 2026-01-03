@@ -162,7 +162,7 @@ def extract_keywords(text, top_k=10):
     return keywords[:top_k]
 
     # Reuse semantic retrieval
-    def extract_keywords(text, top_k=10):
+ def extract_keywords(text, top_k=10):
     """
     Extract important topic words using frequency + structure.
     Increased top_k for more fill-in-the-blanks.
