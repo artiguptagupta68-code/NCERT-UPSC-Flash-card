@@ -14,13 +14,12 @@ FILE_ID = "1GoY0DZj1KLdC0Xvur0tQlvW_993biwcZ"
 ZIP_PATH = "ncert.zip"
 EXTRACT_DIR = "ncert_extracted"
 
-# Subject → keywords mapping
 SUBJECTS = {
-    "Polity": ["constitution", "political", "democracy", "rights", "equality"],
-    "Geography": ["climate", "monsoon", "atmosphere", "landforms", "resources"],
-    "Economics": ["economy", "production", "growth", "market", "development"],
-    "History": ["history", "ancient", "medieval", "modern", "empire"],
-    "Sociology": ["society", "social", "caste", "culture", "community"]
+    "Polity": ["constitution", "rights", "equality", "democracy"],
+    "Geography": ["climate", "monsoon", "atmosphere", "resources"],
+    "Economics": ["economy", "development", "market", "growth"],
+    "History": ["ancient", "medieval", "modern", "empire"],
+    "Psychology": ["group", "behaviour", "social", "individual"]
 }
 
 
@@ -44,38 +43,27 @@ def download_and_extract():
     with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
         zip_ref.extractall(EXTRACT_DIR)
 
-    for z in Path(EXTRACT_DIR).rglob("*.zip"):
-        try:
-            with zipfile.ZipFile(z, "r") as inner:
-                inner.extractall(z.parent / z.stem)
-        except:
-            pass
+
+# ================= MODEL =================
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+model = load_model()
 
 
-# ================= TEXT CLEANING =================
-def clean_text(text):
-    junk = [
-        r"Prelims\.indd.*", r"ISBN.*", r"Reprint.*", r"Printed.*",
-        r"All rights reserved.*", r"University.*", r"Editor.*",
-        r"Copyright.*", r"\d{1,2}\s[A-Za-z]+\s\d{4}"
-    ]
-    for j in junk:
-        text = re.sub(j, " ", text, flags=re.I)
-    return re.sub(r"\s+", " ", text).strip()
-
-
+# ================= PDF READING =================
 def read_pdf(path):
     try:
         reader = PdfReader(path)
-        text = " ".join(p.extract_text() or "" for p in reader.pages)
-        return clean_text(text)
+        return " ".join(p.extract_text() or "" for p in reader.pages)
     except:
         return ""
 
 
-# ================= LOAD TEXT BY SUBJECT =================
+# ================= SUBJECT FILTER =================
 def load_subject_text(subject):
-    all_texts = []
+    texts = []
     subject_vec = model.encode(subject, convert_to_tensor=True)
 
     for pdf in Path(EXTRACT_DIR).rglob("*.pdf"):
@@ -83,140 +71,84 @@ def load_subject_text(subject):
         if len(text.split()) < 300:
             continue
 
-        # Semantic relevance check
         sample = " ".join(text.split()[:400])
-        sample_vec = model.encode(sample, convert_to_tensor=True)
-        score = util.cos_sim(subject_vec, sample_vec).item()
+        score = util.cos_sim(
+            subject_vec,
+            model.encode(sample, convert_to_tensor=True)
+        ).item()
 
-        if score > 0.25:   # threshold for relevance
-            all_texts.append(text)
+        if score > 0.25:
+            texts.append(text)
 
-    return all_texts
-
-
-# ================= MODEL =================
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    return texts
 
 
-model = load_model()
-
-
-# ================= PROCESSING =================
-def clean_pdf_text(text):
-    patterns = [
-        r"LET'S DO IT.*", r"LET'S DEBATE.*", r"Reprint.*",
-        r"Page \d+", r"©.*", r"Activity.*", r"Exercise.*"
-    ]
-    for p in patterns:
-        text = re.sub(p, " ", text, flags=re.I)
-    return re.sub(r"\s+", " ", text).strip()
-
-
+# ================= HELPERS =================
 def split_paragraphs(text):
-    return [p.strip() for p in re.split(r'\n{1,}|\.\s{2,}', text) if len(p.split()) > 40]
+    paras = re.split(r'\n{1,}|\.\s{2,}', text)
+    return [p.strip() for p in paras if len(p.split()) > 25]
+
+
+def limit_text(text, max_sentences=3):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return " ".join(sentences[:max_sentences])
+
+
+def topic_relevant(paragraph, topic):
+    topic_vec = model.encode(topic, convert_to_tensor=True)
+    para_vec = model.encode(paragraph, convert_to_tensor=True)
+    return util.cos_sim(topic_vec, para_vec).item() > 0.35
 
 
 # ================= FLASHCARD ENGINE =================
-def extract_chapter_structure(text, topic):
-    """
-    Split NCERT text into:
-    - About/Introduction
-    - Subheadings (What, How, Why, Types of...)
-    """
-    text_lower = text.lower()
-    if topic.lower() not in text_lower:
-        return None  # topic not present in this chapter
-
-    # Split into paragraphs (rough)
-    paragraphs = re.split(r'\n{1,}|\.\s{2,}', text)
-
-    # Identify subheadings: lines in Title Case or uppercase
-    heading_regex = re.compile(r'^(?:[A-Z][A-Za-z\s]{3,60}|[A-Z\s]{5,})$')
-    structured = {}
-    current_heading = "About"
-    structured[current_heading] = []
-
-    for para in paragraphs:
-        para_clean = para.strip()
-        if not para_clean:
-            continue
-        if heading_regex.match(para_clean):
-            current_heading = para_clean
-            structured[current_heading] = []
-        else:
-            structured[current_heading].append(para_clean)
-
-    # Convert lists to full paragraphs
-    for k in structured:
-        structured[k] = " ".join(structured[k]).strip()
-
-    return structured
-
-def map_flashcard_fields(structured):
-    """
-    Safely map NCERT subheadings to What / How / Why
-    """
-
-    what, how, why = None, None, None
-    headings = list(structured.keys())
-
-    # --- Pass 1: Try intelligent heading-based mapping ---
-    for heading, para in structured.items():
-        h = heading.lower()
-
-        if not what and any(k in h for k in ["what", "meaning", "nature", "definition"]):
-            what = para
-
-        elif not how and any(k in h for k in ["how", "formation", "process", "types", "features"]):
-            how = para
-
-        elif not why and any(k in h for k in ["why", "importance", "significance", "role"]):
-            why = para
-
-    # --- Pass 2: Safe fallbacks (NO INDEX ERRORS) ---
-    if not what:
-        what = structured.get("About") or structured[headings[0]]
-
-    if not how:
-        how = structured[headings[1]] if len(headings) > 1 else what
-
-    if not why:
-        why = structured[headings[2]] if len(headings) > 2 else what
-
-    return what, how, why
-
-
 def generate_flashcard(texts, topic):
-    combined_text = " ".join(texts)
-    structured = extract_chapter_structure(combined_text, topic)
-    if not structured:
+    all_text = " ".join(texts)
+    paragraphs = split_paragraphs(all_text)
+
+    relevant = [p for p in paragraphs if topic_relevant(p, topic)]
+
+    if len(relevant) < 2:
         return "⚠️ Topic not found clearly in NCERT content."
-    what, how, why = map_flashcard_fields(structured)
+
+    topic_vec = model.encode(topic, convert_to_tensor=True)
+    para_vecs = model.encode(relevant, convert_to_tensor=True)
+    scores = util.cos_sim(topic_vec, para_vecs)[0]
+
+    ranked = [
+        p for p, _ in sorted(
+            zip(relevant, scores),
+            key=lambda x: x[1],
+            reverse=True
+        )
+    ]
+
+    what = next((p for p in ranked if "defined" in p.lower() or "is a" in p.lower()), ranked[0])
+    how = next((p for p in ranked if any(k in p.lower() for k in ["formed", "process", "works", "functions"])), ranked[1])
+    why = next((p for p in ranked if any(k in p.lower() for k in ["important", "helps", "role", "significance"])), ranked[2])
+
     return f"""
 ### 📘 {topic.title()} — Concept Flashcard
 
 **What is it?**  
-{what}
+{limit_text(what)}
 
 **How does it work?**  
-{how}
+{limit_text(how)}
 
 **Why is it important?**  
-{why}
+{limit_text(why)}
 """
 
-# ================= STREAMLIT UI =================
+
+# ================= UI =================
 download_and_extract()
 
-subject = st.selectbox("Select Subject", options=list(SUBJECTS.keys()))
-topic = st.text_input("Enter Concept / Topic (e.g., Freedom, Groups, Constitution)")
+subject = st.selectbox("Select Subject", list(SUBJECTS.keys()))
+topic = st.text_input("Enter Topic (e.g., Group, Equality, Constitution)")
 
 if st.button("Generate Flashcard"):
     texts = load_subject_text(subject)
     if not texts:
-        st.error(f"No PDFs found for subject '{subject}'.")
+        st.error("No PDFs found for this subject.")
     else:
-        result = generate_flashcard(texts, topic)
-        st.markdown(result)
+        st.markdown(generate_flashcard(texts, topic))
