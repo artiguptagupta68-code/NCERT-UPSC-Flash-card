@@ -144,7 +144,29 @@ def generate_flashcard(texts, topic):
     return flashcard
 
 # ================= ACTIVE LEARNING LOGIC =================
-def extract_keywords(text, top_k=6):
+def extract_keywords(text, top_k=10):
+    """
+    Extract important topic words using frequency + structure.
+    Increased top_k for more fill-in-the-blanks.
+    """
+    words = re.findall(r"\b[A-Za-z]{4,}\b", text)
+    stopwords = {
+        "that", "this", "with", "from", "which", "their",
+        "these", "there", "where", "when", "whose", "while"
+    }
+    words = [w for w in words if w.lower() not in stopwords]
+    freq = {}
+    for w in words:
+        freq[w] = freq.get(w, 0) + 1
+    keywords = sorted(freq, key=freq.get, reverse=True)
+    return keywords[:top_k]
+
+    # Reuse semantic retrieval
+    def extract_keywords(text, top_k=10):
+    """
+    Extract important topic words using frequency + structure.
+    Increased top_k for more fill-in-the-blanks.
+    """
     words = re.findall(r"\b[A-Za-z]{4,}\b", text)
     stopwords = {
         "that", "this", "with", "from", "which", "their",
@@ -158,10 +180,16 @@ def extract_keywords(text, top_k=6):
     return keywords[:top_k]
 
 def generate_active_learning_card(texts, topic):
+    """
+    Active learning mode:
+    - Topic visible
+    - Basic info visible
+    - More important words hidden (fill-in-the-blanks)
+    """
     if not texts:
         return "⚠️ No readable content found."
 
-    # Reuse semantic retrieval
+    # Semantic retrieval
     topic_query = (
         f"Explain the concept of {topic} as defined in NCERT textbooks, "
         f"including definition and importance."
@@ -189,11 +217,13 @@ def generate_active_learning_card(texts, topic):
     base_text = " ".join(c for c, _ in ranked[:2])
     base_text = re.sub(r"\s+", " ", base_text)
 
-    keywords = extract_keywords(base_text)
+    # Extract more keywords
+    keywords = extract_keywords(base_text, top_k=10)
 
     masked_text = base_text
     for kw in keywords:
-        masked_text = re.sub(rf"\b{kw}\b", "_____", masked_text, count=1)
+        # Mask all occurrences for extra blanks
+        masked_text = re.sub(rf"\b{kw}\b", "_____", masked_text)
 
     return f"""
 ### 🧠 Active Learning: {topic}
@@ -201,6 +231,8 @@ def generate_active_learning_card(texts, topic):
 **Fill in the missing important terms**
 
 {masked_text}
+
+
 
 ---
 💡 Answers are directly from NCERT content.
