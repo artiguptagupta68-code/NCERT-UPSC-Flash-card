@@ -127,7 +127,7 @@ def generate_flashcard(texts, topic):
     concept = " ".join(sentences[:4])
     explanation = " ".join(sentences[4:8])
 
-    flashcard = f"""
+    return f"""
 ### 📘 {topic} — Concept Summary
 
 **Concept Overview**
@@ -141,37 +141,27 @@ def generate_flashcard(texts, topic):
 - Helps in analytical and application-based questions
 - Important for NCERT & UPSC preparation
 """
-    return flashcard
 
 # ================= ACTIVE LEARNING LOGIC =================
-def extract_keywords(text, top_k=10):
-    """
-    Extract important topic words using frequency + structure.
-    Increased top_k for more fill-in-the-blanks.
-    """
+def extract_keywords(text, top_k=50):
     words = re.findall(r"\b[A-Za-z]{4,}\b", text)
     stopwords = {
         "that", "this", "with", "from", "which", "their",
         "these", "there", "where", "when", "whose", "while"
     }
     words = [w for w in words if w.lower() not in stopwords]
+
     freq = {}
     for w in words:
         freq[w] = freq.get(w, 0) + 1
+
     keywords = sorted(freq, key=freq.get, reverse=True)
     return keywords[:top_k]
 
-def generate_active_learning_card(texts, topic):
-    """
-    Active learning mode:
-    - Topic visible
-    - Basic info visible
-    - More important words hidden (fill-in-the-blanks)
-    """
+def generate_active_learning_card(texts, topic, num_blanks):
     if not texts:
         return "⚠️ No readable content found."
 
-    # Semantic retrieval
     topic_query = (
         f"Explain the concept of {topic} as defined in NCERT textbooks, "
         f"including definition and importance."
@@ -199,18 +189,20 @@ def generate_active_learning_card(texts, topic):
     base_text = " ".join(c for c, _ in ranked[:2])
     base_text = re.sub(r"\s+", " ", base_text)
 
-    # Extract more keywords
-    keywords = extract_keywords(base_text, top_k=10)
+    all_keywords = extract_keywords(base_text, top_k=50)
+    max_possible = len(all_keywords)
+
+    if num_blanks > max_possible:
+        return f"⚠️ You requested **{num_blanks} blanks**, but only **{max_possible}** important terms are available."
 
     masked_text = base_text
-    for kw in keywords:
-        # Mask all occurrences for extra blanks
+    for kw in all_keywords[:num_blanks]:
         masked_text = re.sub(rf"\b{kw}\b", "_____", masked_text)
 
     return f"""
 ### 🧠 Active Learning: {topic}
 
-**Fill in the missing important terms**
+**Fill in the missing important terms ({num_blanks} blanks)**
 
 {masked_text}
 
@@ -230,14 +222,26 @@ with tab1:
         key="flashcard_topic"
     )
     if st.button("Generate Flashcard"):
-        result = generate_flashcard(texts, topic)
-        st.markdown(result)
+        st.markdown(generate_flashcard(texts, topic))
 
 with tab2:
     topic_al = st.text_input(
         "Enter Topic for Active Learning",
         key="active_topic"
     )
+    num_blanks = st.number_input(
+        "Number of fill-in-the-blanks",
+        min_value=1,
+        max_value=25,
+        value=5,
+        step=1
+    )
+
     if st.button("Start Active Learning"):
-        active_result = generate_active_learning_card(texts, topic_al)
-        st.markdown(active_result)
+        st.markdown(
+            generate_active_learning_card(
+                texts,
+                topic_al,
+                num_blanks
+            )
+        )
