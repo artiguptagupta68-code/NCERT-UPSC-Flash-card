@@ -16,7 +16,7 @@ EXTRACT_DIR = "ncert_extracted"
 
 # ================= STREAMLIT =================
 st.set_page_config("NCERT Flashcard Generator", layout="wide")
-st.title("📘 NCERT → Smart Concept Flashcard")
+st.title("📘 NCERT → Smart Concept Flashcard + Active Learning")
 
 # ================= DOWNLOAD & EXTRACT =================
 def download_and_extract():
@@ -40,7 +40,6 @@ def download_and_extract():
         except Exception:
             pass
 
-
 # ================= CLEANING =================
 def clean_text(text):
     junk = [
@@ -53,7 +52,6 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-
 def read_pdf(path):
     try:
         reader = PdfReader(path)
@@ -61,7 +59,6 @@ def read_pdf(path):
         return clean_text(text)
     except Exception:
         return ""
-
 
 # ================= LOAD ALL TEXT =================
 def load_all_text():
@@ -72,7 +69,6 @@ def load_all_text():
             texts.append(txt)
     return texts
 
-
 # ================= EMBEDDINGS =================
 @st.cache_resource
 def load_model():
@@ -80,36 +76,28 @@ def load_model():
 
 model = load_model()
 
-
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
-
     if not texts:
         return "⚠️ No readable content found."
 
-    # -------- STEP 1: CHUNKING --------
     chunks = []
     for text in texts:
         sentences = re.split(r'(?<=[.!?])\s+', text)
         buffer = []
-
         for s in sentences:
             if len(s.split()) < 6:
                 continue
-
             buffer.append(s)
-
             if len(" ".join(buffer).split()) >= 80:
                 chunks.append(" ".join(buffer))
                 buffer = []
-
         if buffer:
             chunks.append(" ".join(buffer))
 
     if not chunks:
         return "⚠️ No meaningful content found."
 
-    # -------- STEP 2: SEMANTIC MATCHING --------
     topic_query = (
         f"Explain the concept of {topic} as defined in NCERT textbooks, "
         f"including definition, features, importance and examples."
@@ -124,7 +112,6 @@ def generate_flashcard(texts, topic):
         if score > 0.40:
             scored.append((chunk, score))
 
-    # -------- FALLBACK: ALWAYS RETURN TOP CHUNKS --------
     if not scored:
         scores = cosine_similarity(chunk_vecs, topic_vec).flatten()
         scored = list(zip(chunks, scores))
@@ -132,17 +119,14 @@ def generate_flashcard(texts, topic):
     scored.sort(key=lambda x: x[1], reverse=True)
     best_chunks = [c for c, _ in scored[:3]]
 
-    # -------- STEP 3: SUMMARIZATION --------
     joined = " ".join(best_chunks)
     joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
     joined = re.sub(r"\s+", " ", joined)
 
     sentences = re.split(r'(?<=[.!?])\s+', joined)
-
     concept = " ".join(sentences[:4])
     explanation = " ".join(sentences[4:8])
 
-    # -------- STEP 4: FLASHCARD --------
     flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
@@ -159,15 +143,89 @@ def generate_flashcard(texts, topic):
 """
     return flashcard
 
+# ================= ACTIVE LEARNING LOGIC =================
+def extract_keywords(text, top_k=6):
+    words = re.findall(r"\b[A-Za-z]{4,}\b", text)
+    stopwords = {
+        "that", "this", "with", "from", "which", "their",
+        "these", "there", "where", "when", "whose", "while"
+    }
+    words = [w for w in words if w.lower() not in stopwords]
+    freq = {}
+    for w in words:
+        freq[w] = freq.get(w, 0) + 1
+    keywords = sorted(freq, key=freq.get, reverse=True)
+    return keywords[:top_k]
+
+def generate_active_learning_card(texts, topic):
+    if not texts:
+        return "⚠️ No readable content found."
+
+    # Reuse semantic retrieval
+    topic_query = (
+        f"Explain the concept of {topic} as defined in NCERT textbooks, "
+        f"including definition and importance."
+    )
+
+    chunks = []
+    for text in texts:
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        buffer = []
+        for s in sentences:
+            if len(s.split()) < 6:
+                continue
+            buffer.append(s)
+            if len(" ".join(buffer).split()) >= 80:
+                chunks.append(" ".join(buffer))
+                buffer = []
+        if buffer:
+            chunks.append(" ".join(buffer))
+
+    topic_vec = model.encode([topic_query])
+    chunk_vecs = model.encode(chunks)
+    scores = cosine_similarity(chunk_vecs, topic_vec).flatten()
+    ranked = sorted(zip(chunks, scores), key=lambda x: x[1], reverse=True)
+
+    base_text = " ".join(c for c, _ in ranked[:2])
+    base_text = re.sub(r"\s+", " ", base_text)
+
+    keywords = extract_keywords(base_text)
+
+    masked_text = base_text
+    for kw in keywords:
+        masked_text = re.sub(rf"\b{kw}\b", "_____", masked_text, count=1)
+
+    return f"""
+### 🧠 Active Learning: {topic}
+
+**Fill in the missing important terms**
+
+{masked_text}
+
+---
+💡 Answers are directly from NCERT content.
+"""
 
 # ================= UI =================
 download_and_extract()
+texts = load_all_text()
 
-topic = st.text_input(
-    "Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)"
-)
+tab1, tab2 = st.tabs(["📘 Flashcard", "🧠 Active Learning"])
 
-if st.button("Generate Flashcard"):
-    texts = load_all_text()
-    result = generate_flashcard(texts, topic)
-    st.markdown(result)
+with tab1:
+    topic = st.text_input(
+        "Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)",
+        key="flashcard_topic"
+    )
+    if st.button("Generate Flashcard"):
+        result = generate_flashcard(texts, topic)
+        st.markdown(result)
+
+with tab2:
+    topic_al = st.text_input(
+        "Enter Topic for Active Learning",
+        key="active_topic"
+    )
+    if st.button("Start Active Learning"):
+        active_result = generate_active_learning_card(texts, topic_al)
+        st.markdown(active_result)
