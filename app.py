@@ -104,7 +104,7 @@ def generate_flashcard(texts, topic):
                 continue
             buffer.append(s)
 
-            if len(" ".join(buffer).split()) >= 120:
+            if len(" ".join(buffer).split()) >= 80:
                 chunks.append(" ".join(buffer))
                 buffer = []
 
@@ -115,19 +115,33 @@ def generate_flashcard(texts, topic):
         return "⚠️ No meaningful content found."
 
     # -------- STEP 2: SEMANTIC MATCHING --------
-    topic_vec = model.encode([topic])
+   topic_query = f"""
+Explain the concept of {topic} as defined in NCERT textbooks,
+including definition, features, importance and examples.
+"""
+
+    topic_vec = model.encode([topic_query])
+    
     chunk_vecs = model.encode(chunks)
 
     scored = []
     for chunk, vec in zip(chunks, chunk_vecs):
         score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.75:   # semantic relevance threshold
+        if score > 0.40:   # semantic relevance threshold
             scored.append((chunk, score))
 
     if not scored:
         return "⚠️ Topic not found in NCERT content."
 
+   
     scored.sort(key=lambda x: x[1], reverse=True)
+
+# fallback if threshold filtering fails
+    if not scored:
+    scored = list(zip(chunks, 
+                      cosine_similarity(chunk_vecs, topic_vec).flatten()))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
     best_chunks = [c for c, _ in scored[:3]]
 
     # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
