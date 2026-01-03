@@ -163,10 +163,10 @@ def extract_keywords(text, top_k=10):
 
     # Reuse semantic retrieval
  def extract_keywords(text, top_k=10):
-    """
-    Extract important topic words using frequency + structure.
-    Increased top_k for more fill-in-the-blanks.
-    """
+     """
+     Extract important topic words using frequency + structure.
+     Increased top_k for more fill-in-the-blanks.
+     """
     words = re.findall(r"\b[A-Za-z]{4,}\b", text)
     stopwords = {
         "that", "this", "with", "from", "which", "their",
