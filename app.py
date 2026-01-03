@@ -159,6 +159,12 @@ def extract_keywords(text, top_k=50):
     return keywords[:top_k]
 
 def generate_active_learning_card(texts, topic, num_blanks):
+    """
+    Active learning mode:
+    - Topic visible
+    - Basic info visible
+    - EXACT number of blanks as chosen by user
+    """
     if not texts:
         return "⚠️ No readable content found."
 
@@ -167,6 +173,7 @@ def generate_active_learning_card(texts, topic, num_blanks):
         f"including definition and importance."
     )
 
+    # -------- Chunking --------
     chunks = []
     for text in texts:
         sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -189,20 +196,33 @@ def generate_active_learning_card(texts, topic, num_blanks):
     base_text = " ".join(c for c, _ in ranked[:2])
     base_text = re.sub(r"\s+", " ", base_text)
 
-    all_keywords = extract_keywords(base_text, top_k=50)
-    max_possible = len(all_keywords)
+    # -------- Keyword extraction --------
+    keywords = extract_keywords(base_text, top_k=50)
 
-    if num_blanks > max_possible:
-        return f"⚠️ You requested **{num_blanks} blanks**, but only **{max_possible}** important terms are available."
+    if num_blanks > len(keywords):
+        return (
+            f"⚠️ You requested **{num_blanks} blanks**, "
+            f"but only **{len(keywords)}** important terms are available."
+        )
 
     masked_text = base_text
-    for kw in all_keywords[:num_blanks]:
-        masked_text = re.sub(rf"\b{kw}\b", "_____", masked_text)
+    blanks_created = 0
+
+    # -------- Create EXACT blanks --------
+    for kw in keywords:
+        if blanks_created >= num_blanks:
+            break
+
+        pattern = rf"\b{re.escape(kw)}\b"
+
+        if re.search(pattern, masked_text):
+            masked_text = re.sub(pattern, "_____", masked_text, count=1)
+            blanks_created += 1
 
     return f"""
 ### 🧠 Active Learning: {topic}
 
-**Fill in the missing important terms ({num_blanks} blanks)**
+**Fill in the missing important terms ({blanks_created} blanks)**
 
 {masked_text}
 
