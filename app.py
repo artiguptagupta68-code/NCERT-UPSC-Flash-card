@@ -156,29 +156,37 @@ def extract_chapter_structure(text, topic):
 
 def map_flashcard_fields(structured):
     """
-    Map subheadings to flashcard fields: What / How / Why
+    Safely map NCERT subheadings to What / How / Why
     """
-    what, how, why = None, None, None
 
+    what, how, why = None, None, None
+    headings = list(structured.keys())
+
+    # --- Pass 1: Try intelligent heading-based mapping ---
     for heading, para in structured.items():
-        h_low = heading.lower()
-        if not what and any(k in h_low for k in ["what", "meaning", "nature"]):
+        h = heading.lower()
+
+        if not what and any(k in h for k in ["what", "meaning", "nature", "definition"]):
             what = para
-        elif not how and any(k in h_low for k in ["how", "formation", "process", "types"]):
+
+        elif not how and any(k in h for k in ["how", "formation", "process", "types", "features"]):
             how = para
-        elif not why and any(k in h_low for k in ["why", "importance", "significance"]):
+
+        elif not why and any(k in h for k in ["why", "importance", "significance", "role"]):
             why = para
 
-    # Fallbacks if not found
-    headings = list(structured.keys())
+    # --- Pass 2: Safe fallbacks (NO INDEX ERRORS) ---
     if not what:
-        what = structured.get("About", headings[0] if headings else "Content unavailable.")
+        what = structured.get("About") or structured[headings[0]]
+
     if not how:
-        how = structured.get(headings[1], what)
+        how = structured[headings[1]] if len(headings) > 1 else what
+
     if not why:
-        why = structured.get(headings[2], what)
+        why = structured[headings[2]] if len(headings) > 2 else what
 
     return what, how, why
+
 
 def generate_flashcard(texts, topic):
     combined_text = " ".join(texts)
