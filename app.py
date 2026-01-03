@@ -116,9 +116,9 @@ def generate_flashcard(texts, topic):
 
     # -------- STEP 2: SEMANTIC MATCHING --------
    topic_query = f"""
-Explain the concept of {topic} as defined in NCERT textbooks,
-including definition, features, importance and examples.
-"""
+   Explain the concept of {topic} as defined in NCERT textbooks,
+   including definition, features, importance and examples.
+   """
 
     topic_vec = model.encode([topic_query])
     
