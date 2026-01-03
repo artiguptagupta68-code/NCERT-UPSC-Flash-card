@@ -37,7 +37,7 @@ def download_and_extract():
         try:
             with zipfile.ZipFile(z, "r") as inner:
                 inner.extractall(z.parent / z.stem)
-        except:
+        except Exception:
             pass
 
 
@@ -59,7 +59,7 @@ def read_pdf(path):
         reader = PdfReader(path)
         text = " ".join(p.extract_text() or "" for p in reader.pages)
         return clean_text(text)
-    except:
+    except Exception:
         return ""
 
 
@@ -83,12 +83,6 @@ model = load_model()
 
 # ================= FLASHCARD LOGIC =================
 def generate_flashcard(texts, topic):
-    """
-    1. Read all text
-    2. Find semantically relevant chunks
-    3. Compress meaning
-    4. Generate clean conceptual flashcard
-    """
 
     if not texts:
         return "⚠️ No readable content found."
@@ -102,6 +96,7 @@ def generate_flashcard(texts, topic):
         for s in sentences:
             if len(s.split()) < 6:
                 continue
+
             buffer.append(s)
 
             if len(" ".join(buffer).split()) >= 80:
@@ -115,39 +110,30 @@ def generate_flashcard(texts, topic):
         return "⚠️ No meaningful content found."
 
     # -------- STEP 2: SEMANTIC MATCHING --------
-   topic_query = f"""
-   Explain the concept of {topic} as defined in NCERT textbooks,
-   including definition, features, importance and examples.
-   """
+    topic_query = (
+        f"Explain the concept of {topic} as defined in NCERT textbooks, "
+        f"including definition, features, importance and examples."
+    )
 
     topic_vec = model.encode([topic_query])
-    
     chunk_vecs = model.encode(chunks)
 
     scored = []
     for chunk, vec in zip(chunks, chunk_vecs):
         score = cosine_similarity([vec], topic_vec)[0][0]
-        if score > 0.40:   # semantic relevance threshold
+        if score > 0.40:
             scored.append((chunk, score))
 
+    # -------- FALLBACK: ALWAYS RETURN TOP CHUNKS --------
     if not scored:
-        return "⚠️ Topic not found in NCERT content."
+        scores = cosine_similarity(chunk_vecs, topic_vec).flatten()
+        scored = list(zip(chunks, scores))
 
-   
     scored.sort(key=lambda x: x[1], reverse=True)
-
-# fallback if threshold filtering fails
-    if not scored:
-    scored = list(zip(chunks, 
-                      cosine_similarity(chunk_vecs, topic_vec).flatten()))
-    scored.sort(key=lambda x: x[1], reverse=True)
-
     best_chunks = [c for c, _ in scored[:3]]
 
-    # -------- STEP 3: UNDERSTAND & SUMMARIZE --------
+    # -------- STEP 3: SUMMARIZATION --------
     joined = " ".join(best_chunks)
-
-    # Clean remaining junk
     joined = re.sub(r"(ISBN.*|Reprint.*|Printed.*|All rights reserved.*)", " ", joined)
     joined = re.sub(r"\s+", " ", joined)
 
@@ -156,7 +142,7 @@ def generate_flashcard(texts, topic):
     concept = " ".join(sentences[:4])
     explanation = " ".join(sentences[4:8])
 
-    # -------- STEP 4: STRUCTURED FLASHCARD --------
+    # -------- STEP 4: FLASHCARD --------
     flashcard = f"""
 ### 📘 {topic} — Concept Summary
 
@@ -171,16 +157,15 @@ def generate_flashcard(texts, topic):
 - Helps in analytical and application-based questions
 - Important for NCERT & UPSC preparation
 """
-
     return flashcard
-
-
 
 
 # ================= UI =================
 download_and_extract()
 
-topic = st.text_input("Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)")
+topic = st.text_input(
+    "Enter Topic (e.g. Fundamental Rights, Preamble, Constitution)"
+)
 
 if st.button("Generate Flashcard"):
     texts = load_all_text()
