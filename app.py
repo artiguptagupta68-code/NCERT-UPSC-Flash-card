@@ -161,29 +161,6 @@ def extract_keywords(text, top_k=10):
     keywords = sorted(freq, key=freq.get, reverse=True)
     return keywords[:top_k]
 
-    # Reuse semantic retrieval
- def extract_keywords(text, top_k=10):
-    """
-    Extract important topic words using frequency + structure.
-    Increased top_k for more fill-in-the-blanks.
-    """
-    words = re.findall(r"\b[A-Za-z]{4,}\b", text)
-    
-    stopwords = {
-        "that", "this", "with", "from", "which", "their",
-        "these", "there", "where", "when", "whose", "while"
-    }
-
-    words = [w for w in words if w.lower() not in stopwords]
-
-    freq = {}
-    for w in words:
-        freq[w] = freq.get(w, 0) + 1
-
-    keywords = sorted(freq, key=freq.get, reverse=True)
-    return keywords[:top_k]
-
-
 def generate_active_learning_card(texts, topic):
     """
     Active learning mode:
@@ -236,8 +213,6 @@ def generate_active_learning_card(texts, topic):
 **Fill in the missing important terms**
 
 {masked_text}
-
-
 
 ---
 💡 Answers are directly from NCERT content.
